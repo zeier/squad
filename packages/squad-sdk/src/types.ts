@@ -57,3 +57,8 @@ export type { SquadCustomAgentConfig } from './adapter/types.js';
 export type { SquadEntry } from './multi-squad.js';
 export type { MultiSquadConfig } from './multi-squad.js';
 export type { SquadInfo } from './multi-squad.js';
+
+// --- Stream types (streams/types.ts) ---
+export type { StreamDefinition } from './streams/types.js';
+export type { StreamConfig } from './streams/types.js';
+export type { ResolvedStream } from './streams/types.js';

@@ -1,6 +1,9 @@
 {
   "name": "@bradygaster/squad-cli",
+<<<<<<< HEAD
   "version": "0.8.21-preview.1",
+=======
+  "version": "0.8.18-preview.2",
   "description": "Squad CLI — Command-line interface for the Squad multi-agent runtime",
   "type": "module",
   "bin": {
@@ -154,3 +157,4 @@
     "directory": "packages/squad-cli"
   }
 }
+
