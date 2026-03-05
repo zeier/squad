@@ -75,6 +75,9 @@ async function main(): Promise<void> {
     console.log(`             Flags: --status, --check`);
     console.log(`  ${BOLD}extract${RESET}    Extract learnings from consult mode session`);
     console.log(`             Flags: --dry-run, --clean, --yes, --accept-risks`);
+    console.log(`  ${BOLD}workstreams${RESET} Manage Squad Workstreams (multi-Codespace scaling)`);
+    console.log(`             Usage: workstreams <list|status|activate <name>>`);
+
     console.log(`  ${BOLD}help${RESET}       Show this help message`);
     console.log(`\nFlags:`);
     console.log(`  ${BOLD}--version, -v${RESET}  Print version`);
@@ -235,6 +238,12 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (cmd === 'workstreams' || cmd === 'streams') {
+    const { runWorkstreams } = await import('./cli/commands/streams.js');
+    await runWorkstreams(process.cwd(), args.slice(1));
+    return;
+  }
+
   if (cmd === 'start') {
     const { runStart } = await import('./cli/commands/start.js');
     const hasTunnel = args.includes('--tunnel');
@@ -293,3 +302,6 @@ main().catch(err => {
   }
   process.exit(1);
 });
+
+
+
