@@ -112,6 +112,28 @@ describe('CLI: upgrade command', () => {
     expect(result.toVersion).toBe(currentVersion);
   });
 
+  it('should preserve version stamp after manifest loop (issue #195)', async () => {
+    const agentPath = join(TEST_ROOT, '.github', 'agents', 'squad.agent.md');
+    const currentVersion = getPackageVersion();
+
+    // Simulate old version so upgrade proceeds through the full code path
+    let content = await readFile(agentPath, 'utf-8');
+    content = content.replace(/<!-- version: [^>]+ -->/m, '<!-- version: 0.1.0 -->');
+    await writeFile(agentPath, content);
+
+    // First upgrade — stamps version and runs manifest loop
+    await runUpgrade(TEST_ROOT);
+
+    // Version stamp must survive the manifest loop
+    const afterFirst = await readFile(agentPath, 'utf-8');
+    expect(afterFirst).toContain(`<!-- version: ${currentVersion} -->`);
+
+    // Second upgrade should detect "already current" (not re-stamp from 0.0.0)
+    const second = await runUpgrade(TEST_ROOT);
+    expect(second.fromVersion).toBe(currentVersion);
+    expect(second.toVersion).toBe(currentVersion);
+  });
+
   it('should preserve user state files (team.md, decisions/)', async () => {
     const teamPath = join(TEST_ROOT, '.squad', 'team.md');
     const decisionPath = join(TEST_ROOT, '.squad', 'decisions', 'inbox', 'test.md');

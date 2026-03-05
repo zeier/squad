@@ -387,7 +387,8 @@ export async function runUpgrade(dest: string, options: UpgradeOptions = {}): Pr
   filesUpdated.push('squad.agent.md');
   
   // Upgrade squad-owned files from template manifest
-  const filesToUpgrade = TEMPLATE_MANIFEST.filter(f => f.overwriteOnUpgrade);
+  // Exclude squad.agent.md — already copied and version-stamped above
+  const filesToUpgrade = TEMPLATE_MANIFEST.filter(f => f.overwriteOnUpgrade && f.source !== 'squad.agent.md');
   
   for (const file of filesToUpgrade) {
     const srcPath = path.join(templatesDir, file.source);

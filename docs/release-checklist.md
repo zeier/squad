@@ -9,6 +9,7 @@ This document outlines the steps for preparing and shipping Squad releases. Foll
 - [ ] Run full test suite: `npm test`
 - [ ] All tests pass (53+ tests for current version)
 - [ ] Review CHANGELOG.md for accuracy and completeness
+- [ ] Review and update CONTRIBUTORS.md with v0.X.X section listing key contributions
 - [ ] Verify package.json version matches intended release version
 
 ## Patch Release (e.g., 0.4.2 → 0.4.3)

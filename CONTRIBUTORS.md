@@ -47,9 +47,43 @@ Label your issue with `[INSIDER]` so we can track it.
 
 ---
 
-## Contributors
+## The Squad
 
-*Coming soon: Hall of fame for all contributors.*
+Squad is built by an AI team where each member owns a domain and ships real work. Every release represents contributions from the full roster.
+
+| Name | Role | Domain |
+|------|------|--------|
+| Keaton | Lead | Architecture, code review, product direction |
+| Verbal | Prompt Engineer | Agent design, spawn templates, coordinator logic |
+| Fenster | Core Dev | Runtime implementation, CLI, casting engine |
+| Hockney | Tester | Test coverage, quality gates, CI/CD pipeline |
+| McManus | DevRel | Documentation, messaging, developer experience |
+| Kujan | SDK Expert | Copilot SDK integration, platform patterns |
+| Edie | TypeScript Engineer | Type system, build tooling, public API |
+| Kobayashi | Git & Release | Releases, versioning, CI/CD, branch strategy |
+| Fortier | Node.js Runtime | Node.js runtime integration, system APIs |
+| Rabin | Distribution | npm distribution, package management |
+| Baer | Security | Security audits, vulnerability fixes |
+| Redfoot | Graphic Designer | Visual design, UI assets |
+| Strausz | VS Code Extension | VS Code extension, IDE integration |
+| Saul | Aspire & Observability | Aspire dashboard, OpenTelemetry, Docker |
+| Kovash | REPL & Interactive Shell | REPL implementation, interactive features |
+| Marquez | CLI UX Designer | CLI user experience, command design |
+| Cheritto | TUI Engineer | Terminal UI, interactive components |
+| Breedan | E2E Test Engineer | End-to-end testing, integration validation |
+| Nate | Accessibility Reviewer | Accessibility audits, inclusive design |
+| Waingro | Product Dogfooder | User feedback, real-world validation |
+
+## v0.8.21 Contributors
+
+| Contributor | What They Shipped |
+|-------------|-------------------|
+| Saul | Aspire Docker-only refactor — moved dashboard to standalone container, expanded test coverage from 18 to 45 tests, hardened CLI wiring |
+| Verbal | Squad Places integration — led feedback session with 18 agents, socialized artifacts across 3 waves, driving community engagement |
+| Fenster | Squad Places client — rewrote REST API client, launched offline queue module, shipped integration into core runtime |
+| Hockney | Aspire test expansion — 27-test boost covering Docker path validation, port edge cases, error handling |
+| Kobayashi | Release management — documented v0.8.20 completion, bumped v0.8.21-preview.1, managed branch strategy across dev/insiders/main |
+| McManus | Docs & tone — docs audit completed (10 GitHub issues filed), tone ceiling enforced, documentation consistency verified |
 
 ---
 
