@@ -52,6 +52,29 @@ Squad uses a dev-first, three-branch workflow:
 - Cross-repo work → separate sibling clones, not worktrees
 - See `.squad/skills/git-workflow/SKILL.md` for full procedures
 
+### Fork Contributor Procedure
+
+When contributing to bradygaster/squad from a fork:
+
+1. **Branch base:** Always create from `upstream/dev`, NOT `upstream/main`:
+   ```bash
+   git fetch upstream dev
+   git checkout -b username/issue-slug upstream/dev
+   ```
+2. **Changeset:** Run `npx changeset add` and commit the result BEFORE first push.
+3. **PR command:** Always specify base and head explicitly:
+   ```bash
+   gh pr create --base dev --repo bradygaster/squad --head username:branch-name
+   ```
+4. **Rebase before PR:** If branch diverged from `upstream/dev`, rebase before opening:
+   ```bash
+   git fetch upstream
+   git rebase --onto upstream/dev {wrong-ancestor-commit}
+   git push origin branch-name --force-with-lease
+   ```
+
+❌ **Never open a PR targeting `main` from a fork.** `main` is the release branch — it only receives merges from `dev`.
+
 ## Guardrails — Hard Rules
 
 **NEVER:**

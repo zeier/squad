@@ -35,9 +35,32 @@ Each package has independent versioning via changesets. A change to squad-sdk ma
 
 ### 1. Clone and Install
 
+**Step 1: Fork the repo on GitHub**
+
+Go to https://github.com/bradygaster/squad and click "Fork" to create your own copy.
+
+**Step 2: Clone your fork**
+
 ```bash
-git clone https://github.com/bradygaster/squad.git
+git clone git@github.com:{yourusername}/squad.git
 cd squad
+```
+
+**Step 3: Add upstream remote**
+
+```bash
+git remote add upstream git@github.com:bradygaster/squad.git
+```
+
+**Step 4: Fetch the dev branch**
+
+```bash
+git fetch upstream dev
+```
+
+**Step 5: Install dependencies**
+
+```bash
 npm install
 ```
 
@@ -72,6 +95,18 @@ npm run test:watch
 # Type check only (no emit)
 npm run lint
 ```
+
+### 5. Keeping Your Fork in Sync
+
+Before opening or updating a PR, rebase your branch on the latest upstream dev:
+
+```bash
+git fetch upstream
+git rebase upstream/dev
+git push origin your-branch --force-with-lease
+```
+
+Always rebase before opening or updating a PR to ensure your changes are based on the latest integration branch.
 
 ## Development Workflow
 
@@ -114,11 +149,12 @@ The Co-authored-by trailer is **required** for all commits (added by Copilot CLI
 
 ### Pull Request Process
 
-1. Push your branch: `git push origin bradygaster/217-readme-help-update`
-2. Create a PR: `gh pr create`
-3. Link the issue: Add `Closes #217` to PR description
-4. Wait for CI checks to pass
-5. Request review from the team (agents will respond via comments)
+1. Add a changeset: `npx changeset add` (required before PR — see Changesets section)
+2. Push your branch: `git push origin {yourusername}/217-readme-help-update`
+3. Create a PR with explicit base and head: `gh pr create --base dev --repo bradygaster/squad --head {yourusername}:your-branch`
+4. Link the issue: Add `Closes #217` to PR description
+5. Wait for CI checks to pass
+6. Request review from the team (agents will respond via comments)
 
 ## Code Style & Conventions
 
@@ -213,7 +249,7 @@ You don't need to manually version — changesets handle it.
 
 - **main** — Stable, published releases. All merges include changesets.
 - **insider** — Pre-release features, edge cases. Tag releases as `@insider`.
-- **bradygaster/dev** — Brady's integration branch (team usage).
+- **bradygaster/dev** — Integration branch. **All PRs from forks must target this branch**, not `main`.
 - **user/issue-slug** — Feature branches from users or agents.
 
 ## Continuous Integration

@@ -1053,3 +1053,16 @@ Restricts workflow installation in \`squad init\` to only Squad-framework workfl
 - Version bumps not part of feature PR — revert if accidental, changesets handle release versioning
 - PR target can be Brady's integration branch (bradygaster/dev) not just main/dev/insiders — confirms Brady's workflow practice
 - Co-authored-by trailer only required when Copilot actually authors commits (not for human contributors)
+
+### Fork Contribution Procedure — Lessons from PR #217 (2026-03-06)
+
+**What went wrong:**
+1. PR #217 was opened against `main` instead of `dev`. Had to retarget after creation with `gh pr edit 217 --base dev`.
+2. Changeset file was not added before the initial push. Had to add `.changeset/fix-init-noargs-createteam.md` as a separate commit after the fact.
+3. Branch was created from `upstream/main` history instead of `upstream/dev`. Required `git rebase --onto upstream/dev {main-ancestor-commit}` to move our 3 commits onto dev's tip.
+
+**What to do differently:**
+- Always create feature branches from `upstream/dev`: `git checkout upstream/dev -b username/issue-slug`
+- Always run `npx changeset add` before first push
+- PR command for fork contributions: `gh pr create --base dev --repo bradygaster/squad --head username:branch-name`
+- If branch is based off wrong ancestor: `git rebase --onto upstream/dev {wrong-ancestor} HEAD`
