@@ -1,3 +1,5 @@
+📌 Team update (2026-03-07T16:25:00Z): Actions → CLI migration strategy finalized. 4-agent consensus: migrate 5 squad-specific workflows (12 min/mo) to CLI commands. Keep 9 CI/release workflows (215 min/mo, load-bearing). Zero-risk migration. v0.8.22 quick wins identified: squad labels sync + squad labels enforce. Phased rollout: v0.8.22 (deprecation + CLI) → v0.9.0 (remove workflows) → v0.9.x (opt-in automation). Brady's portability insight captured: CLI-first means Squad runs anywhere (containers, Codespaces). Customer communication strategy: "Zero surprise automation" as competitive differentiator. Decisions merged. — coordinated by Scribe
+
 📌 Team update (2026-03-07T05:56:56Z): Test suite assessment complete — 8 CLI commands untested (high-risk for next-wave bugs #237, #236). 30+ error-handling tests missing. Recommend 12-14 hrs QA work before feature wave. Adopted CLI wiring regression test pattern from PR #238 permanently. — decided by Hockney
 📌 Team update (2026-03-05T22:46:00Z): Azure Function samples require \main\ field and build step — decided by Fenster
 # Project Context
@@ -788,3 +790,40 @@ Fixed 4 bugs in a single branch:
 - Any dependency that is functionally optional (telemetry, observability) must be loaded lazily with try/catch, even if listed in dependencies. Users installing via npx have unpredictable dependency trees.
 - The createRequire() pattern for lazy sync loading is already established in otel.ts (for package.json resolution). Reuse it for all optional deps.
 - When 9+ files import from the same optional package, a centralized wrapper module (otel-api.ts) is the right pattern. Single point of fallback logic, consumers don't need to know about optionality.
+
+## 2026-03-07: CLI Feasibility Assessment — Actions → CLI Commands (Issue request from Brady)
+
+**Task:** Analyze feasibility of migrating squad-specific GitHub Actions workflows to CLI commands. Brady wants to move from workflow-heavy automation to CLI-first tooling.
+
+**Analysis scope:** 5 workflows (sync-squad-labels.yml, squad-triage.yml, squad-issue-assign.yml, squad-heartbeat.yml, squad-label-enforce.yml).
+
+**Key findings:**
+
+1. **squad watch already exists** — It's the local equivalent of heartbeat + triage workflows. Triages issues, monitors PRs, uses shared `@bradygaster/squad-sdk/ralph/triage` logic. Missing: comment posting (4-6 hour gap).
+
+2. **Quick wins (4-7 hours total, v0.8.22):**
+   - `squad labels sync` — 2-3 hours. Reuses `parseRoster()`, just needs `gh label create/edit` loop.
+   - `squad labels enforce` — 2-4 hours. Pure label manipulation logic + `gh` CLI calls.
+
+3. **Medium effort (4-6 hours, v0.8.23):**
+   - Enhance `squad watch` with comment posting — add `gh issue comment` wrapper to `gh-cli.ts`, call from triage cycle.
+
+4. **Do NOT migrate:**
+   - Copilot auto-assign (issue-assign.yml + heartbeat copilot step) — Requires PAT + `agent_assignment` API not exposed in `gh` CLI. Violates zero-dependency goal. Keep as workflow-only feature.
+
+5. **Infrastructure already exists:**
+   - `gh-cli.ts` — thin wrapper around `gh` CLI (ghIssueList, ghIssueEdit, ghPrList, ghAvailable, ghAuthenticated)
+   - `@bradygaster/squad-sdk/ralph/triage` — shared triage logic used by both watch.ts and ralph-triage.js (workflow script)
+   - `watch.ts` — 356 lines, full triage + PR monitoring
+
+**Recommendation:** Ship labels commands (sync + enforce) in v0.8.22 (4-7 hours). Enhance watch with comments in v0.8.23 (4-6 hours). Document copilot auto-assign as workflow-only (PAT-dependent).
+
+**Written to:** `.squad/decisions/inbox/fenster-cli-feasibility.md`
+
+## Learnings
+
+- `squad watch` is already the local heartbeat — it implements 80% of heartbeat.yml + triage.yml functionality (triage logic, PR monitoring, polling loop). Only missing comment posting.
+- The copilot-swe-agent[bot] assignment API (`agent_assignment` field in POST /repos/{owner}/{repo}/issues/{issue_number}/assignees`) is GitHub-specific and not exposed in `gh` CLI. Requires PAT + Octokit or raw HTTPS. CLI commands should not manage PATs — that's a workflow concern with secure secret storage.
+- Label sync/enforce are low-hanging fruit — no parsing complexity (roster already implemented), idempotent operations, thin wrappers around `gh` CLI.
+- The ralph-triage.js script in workflows is a CJS port of the SDK's triage.ts — both use the same logic. This enables parity between Actions (ralph-triage.js) and CLI (watch.ts importing sdk/ralph/triage). Any triage logic changes must sync to both.
+- Quick wins for CLI migration: look for workflows that don't need PATs or bot-specific APIs. Label operations, triage decisions, PR state checks — all available via `gh` CLI.

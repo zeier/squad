@@ -1,4 +1,6 @@
 
+📌 Team update (2026-03-07T16:25:00Z): Actions → CLI migration strategy finalized. 4-agent consensus: migrate 5 squad-specific workflows (12 min/mo) to CLI commands. Keep 9 CI/release workflows (215 min/mo, load-bearing). Zero-risk migration. v0.8.22 quick wins identified: squad labels sync + squad labels enforce. Phased rollout: v0.8.22 (deprecation + CLI) → v0.9.0 (remove workflows) → v0.9.x (opt-in automation). Brady's portability insight captured: CLI-first means Squad runs anywhere (containers, Codespaces). Customer communication strategy: "Zero surprise automation" as competitive differentiator. Decisions merged. — coordinated by Scribe
+
 📌 Team update (2026-03-07T16-19-00Z): Docs triage complete — v0.8.21 ready (SDK-First guide 705 lines, blog, changelog, contributors). #251/#210 queued for v0.8.22. Keaton: v0.8.21 releases pending #248 fix. Hockney: PRs #189/#191 held for v0.8.22. Brady: #249/#250/#251 locked, Actions-to-CLI shift. — decided by McManus
 # Project Context
 
@@ -29,6 +31,39 @@
 **Next Sprint:** Brady to prioritize High-priority items before v1 release; McManus available for execution.
 
 ## Learnings
+
+
+### 2026-03-11: Customer Impact Analysis — GitHub Actions vs. CLI-First Shift
+
+**Status:** Complete. Comprehensive analysis written to .squad/decisions/inbox/mcmanus-customer-impact.md.
+
+**Key Findings:**
+
+1. **Surprise Factor is REAL** — Users running squad init unexpectedly see 10-20 workflow runs in their Actions tab. This creates a trust deficit, even if billing isn't a problem.
+
+2. **Billing Math is Fine** (~100 min/month for active repos) but perception > reality. Users assume hidden automation = hidden costs.
+
+3. **Competitive Advantage:** Other AI tools (Cursor, Aider, etc.) don't install Actions. "Zero Actions required by default" is a positive differentiator.
+
+4. **Opt-In Model is the Answer:** 
+   - Tier 1 (default): CLI-only, no workflows
+   - Tier 2: squad init --with-automation (key workflows)
+   - Tier 3: squad init --with-full-automation (everything, enterprise)
+
+5. **DevRel Messaging Opportunity:** This isn't a downside—it's a story. "Squad puts you in control. No surprise automation." This aligns with transparency values.
+
+6. **Documentation Overhaul Needed:**
+   - README: Lead with CLI-first narrative
+   - New: docs/getting-started.md (CLI as primary UX)
+   - New: docs/automation/github-actions.md (when to use workflows)
+   - New: Migration guide for Beta users
+   - Blog: "Squad is Now CLI-First" announcement
+
+7. **Backward Compatibility:** Existing users keep workflows running. Upgrade path is optional, not forced.
+
+**Recommendation:** Adopt CLI-first as default. This builds customer trust through transparency and gives power users explicit control. Write migration guide and blog post to explain the shift.
+
+**Next:** Awaiting Brady's decision on CLI-first adoption. If greenlit, docs updates can begin immediately.
 
 ### 2026-03-11: v0.8.21 Comprehensive Release Blog & CHANGELOG
 
@@ -1294,5 +1329,6 @@ Multi-agent build of Rock-Paper-Scissors game with 10 AI strategies, Docker infr
 📌 Team update (2026-03-05T22-10-00Z): SDK-First Mode documentation published (3-tier strategy). Documented all 8 builders, CLI flags, config discovery. Tone ceiling maintained. — decided by McManus
 
 📌 Team update (2026-03-07T15-55-00Z): v0.8.21 blog strategy finalized: two-post approach (SDK-First deep dive + comprehensive release wave). Blog post 025 published (336 lines), CHANGELOG updated with [0.8.21] section. Decision on blog scope and audience segmentation created. Ready for release communication. — decided by McManus
+
 
 

@@ -1,4 +1,6 @@
 
+📌 Team update (2026-03-07T16:25:00Z): Actions → CLI migration strategy finalized. 4-agent consensus: migrate 5 squad-specific workflows (12 min/mo) to CLI commands. Keep 9 CI/release workflows (215 min/mo, load-bearing). Zero-risk migration. v0.8.22 quick wins identified: squad labels sync + squad labels enforce. Phased rollout: v0.8.22 (deprecation + CLI) → v0.9.0 (remove workflows) → v0.9.x (opt-in automation). Brady's portability insight captured: CLI-first means Squad runs anywhere (containers, Codespaces). Customer communication strategy: "Zero surprise automation" as competitive differentiator. Decisions merged. — coordinated by Scribe
+
 📌 Team update (2026-03-07T16-19-00Z): Pre-release triage complete. v0.8.21 releases cleanly pending #248 fix. v0.8.22 roadmap well-scoped (9 issues, 3 streams). Close #194 (completed) and #231 (duplicate). Brady directive: #249, #250, #251 locked for v0.8.22. Actions-to-CLI directive received (move 5 squad workflows to CLI). — decided by Keaton
 📌 Team update (2026-03-07T05:56:56Z): Led full issue triage (22 open issues). P0/P1/P2/P3 prioritization complete. v0.8.22 target = 11 issues (5 fix-now + 6 next-wave); 11 deferred to v0.8.23+. Key decisions: CLI audit batch (#237/#236), model config priority (#223 > #205), migration wave grouping (#197/#231/#126), hub repo feature (#242). — decided by Keaton
 # Project Context
@@ -70,5 +72,24 @@
 **Team Status:** External contributors now viable for parallel work. Merge conflicts due to base drift, not code — low friction, normal pattern. Fork-first procedure repeatable.
 
 📌 Team update (2026-03-07T15-55-00Z): v0.8.21 approved for release (Hockney: test validation passed; McManus: blog published). SDK-First init/migrate features remain deferred to v0.8.22 per previous decision. — coordinated by Scribe
+
+## 📌 Actions → CLI Migration Strategy — 2026-03-07T17:30:00Z
+
+**STRATEGIC ANALYSIS COMPLETE.** Brady raised concern about Squad's automated GitHub Actions consuming API quota and surprising users with automation. Keaton analyzed all 15 workflows.
+
+**Classification:**
+- **🟢 KEEP (10 workflows):** Standard CI/CD (squad-ci, squad-release, squad-promote, squad-main-guard, squad-preview, squad-docs, publish, squad-publish, squad-insider-release, squad-insider-publish)
+- **🟡 MIGRATE TO CLI (5 workflows):** Squad-specific automation (sync-squad-labels, squad-triage, squad-issue-assign, squad-heartbeat, squad-label-enforce)
+
+**Migration Path:**
+- **v0.8.22:** Add deprecation warnings + implement CLI commands (`squad labels sync`, `squad triage`, `squad assign`, `squad watch`, `squad labels check`)
+- **v0.9.0:** Remove 5 squad-specific workflows entirely. CLI-first is the only path.
+- **Post-v0.9.0:** Add opt-in automation for users who want it (they install a workflow that calls CLI commands)
+
+**Zero Actions Required Vision:** Squad can work with ONLY 3 standard workflows (CI, release, docs). All Squad logic moves to CLI commands that users invoke explicitly.
+
+**Core Principle:** Squad should be a CLI-first tool that users control, not an automation layer that surprises them. Users invoke Squad when they want it — no background automation without explicit opt-in.
+
+**Document:** `.squad/decisions/inbox/keaton-actions-to-cli-strategy.md` — full analysis with tradeoffs, UX design, technical approach, and implementation roadmap.
 
 

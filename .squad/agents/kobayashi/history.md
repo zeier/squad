@@ -1,3 +1,5 @@
+📌 Team update (2026-03-07T16:25:00Z): Actions → CLI migration strategy finalized. 4-agent consensus: migrate 5 squad-specific workflows (12 min/mo) to CLI commands. Keep 9 CI/release workflows (215 min/mo, load-bearing). Zero-risk migration. v0.8.22 quick wins identified: squad labels sync + squad labels enforce. Phased rollout: v0.8.22 (deprecation + CLI) → v0.9.0 (remove workflows) → v0.9.x (opt-in automation). Brady's portability insight captured: CLI-first means Squad runs anywhere (containers, Codespaces). Customer communication strategy: "Zero surprise automation" as competitive differentiator. Decisions merged. — coordinated by Scribe
+
 # Project Context
 
 - **Owner:** Brady
@@ -102,3 +104,73 @@ All 4 issues resolved by PR #234 closed with comment "Fixed by PR #234 (merged t
 **State Integrity:** Zero conflicts, clean merges, all .squad/ state preserved (merge=union enforced).
 
 **Key Learning:** Sequential merges with confirmed green statuses from peer reviewers eliminate merge conflicts and enable confident pipeline progression. All 7 Phase 2–4 PR merges (5 Phase 2 + 2 Phase 4) completed without intervention.
+
+## 📌 CI/CD Architecture Assessment — 2026-03-15T15-30-00Z
+
+**ASSESSMENT COMPLETE: GitHub Actions vs. CLI Migration Analysis**
+
+Brady requested evaluation of reducing Actions usage by migrating automation to Squad CLI. Comprehensive architectural review completed.
+
+### Key Findings
+
+**1. Actions Minutes Analysis:**
+- ~227 minutes/month total consumption (well under 3,000-min free tier)
+- 9 CI/Release workflows: 215 min/month (MUST STAY — event-driven guardrails)
+- 5 Squad-specific workflows: 12 min/month (MIGRATION CANDIDATES)
+- **Cost is negligible — maintainability is the real constraint**
+
+**2. Load-Bearing Infrastructure (Cannot Move):**
+- `squad-ci.yml` — PR/push event gate (feeds branch protection)
+- `squad-main-guard.yml` — Forbidden file enforcement (prevents state corruption)
+- `squad-release.yml` — Automatic tag creation (triggers downstream pipeline)
+- `squad-promote.yml` — Branch promotion (complex git orchestration)
+- `squad-publish.yml` — npm distribution (final delivery gate)
+- `squad-preview.yml` — Pre-release validation (checkpoint before main merge)
+- `squad-docs.yml` — GitHub Pages deployment
+- `squad-insider-release.yml` & `squad-insider-publish.yml` — Pre-release channel
+
+**Why 9 workflows must stay:**
+- Event-driven guarantees (GitHub Actions provides atomic, immutable event execution)
+- Branch protection integration (cannot replicate CLI-side)
+- Authorization & token management (centralized via Actions)
+- Cannot react to remote events (tag push, PR events) from CLI
+
+**3. Migration Candidates (5 workflows, ~12 min/month):**
+- `sync-squad-labels.yml` → `squad sync-labels` CLI command
+- `squad-triage.yml` → `squad triage` CLI command + Ralph monitor
+- `squad-issue-assign.yml` → `squad assign` CLI command
+- `squad-heartbeat.yml` → Ralph work monitor loop (already implemented)
+- `squad-label-enforce.yml` → `squad validate-labels` CLI command
+
+**Risks: LOW** — None modify protected state, all are idempotent, can be corrected manually if issues arise.
+
+**4. Squad Init Impact:**
+- Current: Installs all 15 workflows
+- Recommended: Keep all, mark squad-specific as "opt-in" via config flag
+- Backward compatible: Existing repos' workflows persist
+- New repos: Receive streamlined workflow set with optional automation
+- Migration path: `squad upgrade --remove-deprecated-workflows` for cleanup
+
+**5. Backward Compatibility Strategy:**
+- **Phase 1 (v0.9):** Document migration path; no code changes
+- **Phase 2 (v1.0):** Implement CLI commands (`squad triage`, `squad assign`, etc.)
+- **Phase 3 (v1.0):** Add deprecation warnings to old workflows
+- **Phase 4 (v1.1):** Provide `squad upgrade --remove-deprecated` flag
+- **Phase 5 (v1.1):** Remove deprecated workflows from new init only
+
+### Recommendations
+
+1. **Keep 9 critical workflows as Actions** — cost is negligible, but guarantees are essential
+2. **Migrate 5 squad-specific workflows to CLI** — improves team autonomy, reduces maintenance
+3. **Implement lazy automation** — Add `automation` config to .squad/config.json (CI + Release always on, Squad-specific opt-in)
+4. **Document in decisions/** — Full assessment saved to `.squad/decisions/inbox/kobayashi-ci-impact.md`
+
+### State Integrity Conclusion
+
+**Zero risk of state corruption from migration:**
+- Migrated workflows (triage, labels) are idempotent (can be re-run without side effects)
+- Critical workflows (release, main-guard) remain as Actions (unchanged)
+- Backward compatibility guaranteed (old workflows persist, don't interfere)
+- Deprecation path is gradual (1+ release cycles notice)
+
+**Timeline:** Can proceed with CLI command implementation immediately (v1.0 target); old workflows coexist during transition.

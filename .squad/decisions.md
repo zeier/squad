@@ -4010,3 +4010,1520 @@ Create TWO complementary blog posts with clear ownership:
 
 **Directive:** Move squad-specific automation (1-5) into CLI commands. Keep standard CI/release workflows.
 
+### 2026-03-07T16:20: User directive — Shift from Actions to CLI
+**By:** Brady (via Copilot)
+**What:** "I'm seriously concerned about our continued abuse of actions and think the more we can stop relying on actions to do things and start relying on the cli to do things, it puts more emphasis and control in the user's hand and less automation with actions. I think we're maybe going to surprise customers with some of the usage in actions and I would really hate for that to be a deterrent from using squad."
+**Why:** User directive — strategic direction for the product. Actions usage can surprise customers with unexpected billing and loss of control. CLI-first puts the user in the driver's seat.
+
+### Current Actions Inventory (15 workflows)
+
+**Squad-specific (customer concern):**
+1. `sync-squad-labels.yml` — Auto-syncs labels from team.md on push
+2. `squad-triage.yml` — Auto-triages issues when labeled "squad"
+3. `squad-issue-assign.yml` — Auto-assigns issues when squad:{member} labeled
+4. `squad-heartbeat.yml` — Ralph heartbeat/auto-triage (cron currently disabled)
+5. `squad-label-enforce.yml` — Label mutual exclusivity on label events
+
+**Standard CI/Release (expected):**
+6. `squad-ci.yml` — Standard PR/push CI
+7. `squad-release.yml` — Tag + release on push to main
+8. `squad-promote.yml` — Branch promotion (workflow_dispatch)
+9. `squad-main-guard.yml` — Forbidden file guard
+10. `squad-preview.yml` — Preview validation
+11. `squad-docs.yml` — Docs build/deploy
+12-15. Publish/insider workflows
+
+**Directive:** Move squad-specific automation (1-5) into CLI commands. Keep standard CI/release workflows.
+
+### Follow-up (Brady, same session):
+> "seems like the more we can offload to ourselves, the more we could control, say, in a container. if actions are doing the work the loop is outside of our control a bit"
+
+**Key insight:** CLI-first makes Squad **portable**. If the work lives in CLI commands instead of Actions, Squad can run anywhere — Codespaces, devcontainers, local terminals, persistent ACA containers. Actions lock the control loop to GitHub's event system. CLI-first means the user (or their infrastructure) owns the execution loop, not GitHub Actions.
+
+
+# CLI Feasibility Assessment — GitHub Actions → CLI Commands
+**Author:** Fenster (Core Dev)  
+**Date:** 2026-03-07  
+**Context:** Brady's request to migrate squad-specific workflows to CLI commands
+
+---
+
+## Executive Summary
+
+**Quick wins:** Label sync + label enforce can ship in v0.8.22 (reuses existing parsers, zero new deps).  
+**Medium effort:** Triage command is 70% done (CLI watch already exists), needs GitHub comment posting.  
+**Heavy lift:** Issue assign + heartbeat need copilot-swe-agent[bot] API (PAT + agent_assignment field) — no `gh` CLI equivalent exists. Watch mode already implements heartbeat's core logic locally.
+
+**Key insight:** We already have `squad watch` — it's the local equivalent of `squad-heartbeat.yml`. The workflow runs in GitHub Actions with PAT; watch runs locally with `gh` CLI. They share the same triage logic (`@bradygaster/squad-sdk/ralph/triage`).
+
+---
+
+## 1. Current CLI Command Inventory
+
+**Existing commands** (`packages/squad-cli/src/cli/commands/`):
+
+| Command | Function | Overlap with Workflows |
+|---------|----------|------------------------|
+| **watch** | Ralph's local polling — triages issues, monitors PRs, assigns labels. Uses `gh` CLI. | ✅ 80% overlap with `squad-heartbeat.yml` + `squad-triage.yml` |
+| plugin | Marketplace add/remove. Uses `gh` CLI for repo access. | ❌ No workflow overlap |
+| export | Export squad state to JSON. | ❌ No workflow overlap |
+| import | Import squad state from JSON. | ❌ No workflow overlap |
+| build | SDK config generation. | ❌ No workflow overlap |
+| doctor | Health checks (local/remote/hub). | ❌ No workflow overlap |
+| aspire | Launch Aspire dashboard for OTel. | ❌ No workflow overlap |
+| start | Interactive shell (Coordinator mode). | ❌ No workflow overlap |
+| consult | Spawn agent for consultation. | ❌ No workflow overlap |
+| rc/rc-tunnel | Remote control server + devtunnel. | ❌ No workflow overlap |
+| copilot/copilot-bridge | Copilot SDK adapter. | ❌ No workflow overlap |
+| link/init-remote | Link to remote squad repo. | ❌ No workflow overlap |
+| streams | Workstream commands (stub). | ❌ No workflow overlap |
+
+**Key reusable infrastructure:**
+- **`gh-cli.ts`** — Thin wrapper around `gh` CLI: `ghIssueList`, `ghIssueEdit`, `ghPrList`, `ghAvailable`, `ghAuthenticated`
+- **`@bradygaster/squad-sdk/ralph/triage`** — Shared triage logic (routing rules, module ownership, keyword matching)
+- **`watch.ts`** — Already implements triage cycle + PR monitoring
+
+---
+
+## 2. Per-Workflow Migration Plan
+
+### 2.1. sync-squad-labels.yml → `squad labels sync`
+
+**Current workflow:** 170 lines. Parses `team.md`, syncs `squad`, `squad:{member}`, `go:*`, `release:*`, `type:*`, `priority:*`, `bug`, `feedback` labels. Uses Octokit.
+
+**Proposed CLI command:**
+```bash
+squad labels sync [--squad-dir .squad] [--dry-run]
+```
+
+**Implementation:**
+- **Size:** S (2-3 hours)
+- **Dependencies:** 
+  - ✅ `gh` CLI (already used in plugin.ts, watch.ts)
+  - ✅ `parseRoster()` from `@bradygaster/squad-sdk/parsers` (already exists)
+  - ✅ Thin wrapper — reuse roster parser, call `gh label create/edit`
+- **Offline:** ❌ Needs GitHub API access via `gh`
+- **Reuse:** Roster parsing (team.md → member list) already exists. Just needs label creation loop with `gh`.
+- **Complexity:** Low. No auth complexity (uses `gh auth` flow). No copilot-swe-agent API.
+
+**Why quick win:** Zero new parsers needed. Label sync is idempotent (create-or-update pattern). Can run manually after `team.md` changes.
+
+---
+
+### 2.2. squad-triage.yml → `squad triage` (or extend `squad watch`)
+
+**Current workflow:** 260 lines. On `squad` label, parses `team.md` + `routing.md`, keyword-matches, applies `squad:{member}` label, posts comment.
+
+**Proposed CLI command:**
+```bash
+squad triage [--issue <number>] [--squad-dir .squad]
+```
+Or: enhance `squad watch` to post comments (currently it only adds labels).
+
+**Implementation:**
+- **Size:** M (4-6 hours)
+- **Dependencies:** 
+  - ✅ `gh` CLI (already used)
+  - ✅ `triageIssue()` from `@bradygaster/squad-sdk/ralph/triage` (already used in watch.ts)
+  - ❌ **Missing:** `gh issue comment` wrapper in `gh-cli.ts` (5 lines to add)
+- **Offline:** ❌ Needs GitHub API
+- **Reuse:** 
+  - **watch.ts already does this** (line 189-209). Just missing comment posting.
+  - Triage logic, routing rules, module ownership — all implemented.
+- **Complexity:** Low. The logic exists; just needs `gh issue comment <number> --body <text>` wrapper.
+
+**Why medium effort:** Code exists. Just needs comment posting feature added to `gh-cli.ts` and called from `watch.ts`.
+
+---
+
+### 2.3. squad-issue-assign.yml → ???
+
+**Current workflow:** 160 lines. On `squad:{member}` label, posts assignment comment, calls **copilot-swe-agent[bot] assignment API with PAT** (lines 116-161).
+
+**Problem:** The workflow uses a special POST endpoint:
+```js
+POST /repos/{owner}/{repo}/issues/{issue_number}/assignees
+{
+  assignees: ['copilot-swe-agent[bot]'],
+  agent_assignment: {
+    target_repo: `${owner}/${repo}`,
+    base_branch: baseBranch,
+    custom_instructions: '',
+    custom_agent: '',
+    model: ''
+  }
+}
+```
+**This endpoint does NOT exist in `gh` CLI.** It requires:
+- Personal Access Token (PAT) with `issues:write` scope
+- Direct Octokit call (cannot use `gh` as thin wrapper)
+
+**Migration options:**
+1. **Add Octokit dependency** — heavyweight (35+ deps), violates zero-dependency CLI goal
+2. **Add raw HTTPS module** — 50-100 lines to make authenticated POST with PAT, parse JSON response
+3. **Document manual workflow** — "To auto-assign @copilot, use the GitHub Actions workflow (requires PAT)"
+
+**Proposed approach:**
+- **Do NOT migrate.** Keep as workflow-only feature.
+- **Reasoning:** The copilot-swe-agent assignment API is GitHub-specific and requires secrets (PAT). CLI commands should not manage secrets. Workflows already have secure secret storage.
+- **Alternative:** Document `squad watch` as the local equivalent (it can label + post comments, but not trigger bot assignment).
+
+**Implementation:**
+- **Size:** XL (8-12 hours if full migration)
+- **Dependencies:** 
+  - ❌ PAT management (needs secret storage or prompting)
+  - ❌ Octokit or raw HTTPS POST wrapper (50-100 lines)
+  - ❌ Not available in `gh` CLI
+- **Offline:** ❌ Never (GitHub-specific API)
+- **Complexity:** High. Requires secret handling, bot assignment API, error handling, fallback.
+
+**Recommendation:** **Do not migrate.** Keep as workflow. Document that copilot auto-assign requires Actions + PAT.
+
+---
+
+### 2.4. squad-heartbeat.yml → Already exists as `squad watch`
+
+**Current workflow:** 170 lines. Runs on cron (disabled), issues closed/labeled, PRs closed. Triages untriaged issues, assigns @copilot to `squad:copilot` issues.
+
+**CLI equivalent:** **Already shipped as `squad watch`** (`packages/squad-cli/src/cli/commands/watch.ts`, 356 lines).
+
+**What `squad watch` does:**
+- Polls open issues with `squad` label
+- Triages untriaged issues (adds `squad:{member}` label)
+- Monitors PRs (draft/needs-review/changes-requested/CI failures/ready-to-merge)
+- Runs on interval (default: 30 minutes)
+- Uses `gh` CLI for auth + API access
+- Uses shared `@bradygaster/squad-sdk/ralph/triage` logic
+
+**What `squad watch` does NOT do (that heartbeat.yml does):**
+- ❌ Post triage comments (workflow posts "Ralph — Auto-Triage" comments)
+- ❌ Auto-assign copilot-swe-agent[bot] (requires PAT + bot API, same issue as #2.3)
+
+**Implementation gap:**
+- **Comment posting:** M (4-6 hours) — add `gh issue comment` wrapper to `gh-cli.ts`, call it from `runCheck()` in watch.ts
+- **Copilot auto-assign:** Do not migrate (same as #2.3)
+
+**Migration plan:**
+- ✅ **Already done.** `squad watch` is the local heartbeat.
+- **Add comment posting** to match workflow behavior (quick win, 4-6 hours).
+- **Document copilot auto-assign** as workflow-only (requires PAT).
+
+**Recommendation:** Enhance `squad watch` with comment posting. Keep copilot auto-assign in workflow.
+
+---
+
+### 2.5. squad-label-enforce.yml → `squad labels enforce`
+
+**Current workflow:** 180 lines. On label applied, removes conflicting labels from mutual-exclusivity namespaces (`go:`, `release:`, `type:`, `priority:`). Posts update comment.
+
+**Proposed CLI command:**
+```bash
+squad labels enforce [--issue <number>] [--squad-dir .squad]
+```
+
+**Implementation:**
+- **Size:** S (2-4 hours)
+- **Dependencies:** 
+  - ✅ `gh` CLI (already used)
+  - ❌ `gh issue edit --remove-label <label>` (already exists in `gh-cli.ts` as `ghIssueEdit`)
+  - ❌ `gh issue comment` (needs 5-line wrapper in `gh-cli.ts`)
+- **Offline:** ❌ Needs GitHub API
+- **Reuse:** 
+  - `ghIssueEdit()` already supports `removeLabel` (line 119).
+  - Enforcement logic is pure JS (no parsing needed).
+- **Complexity:** Low. Fetch issue labels, check prefixes, remove conflicts, post comment.
+
+**Why quick win:** No parsing. No complex logic. Just label list manipulation + `gh` CLI calls (already have the wrappers).
+
+---
+
+## 3. The `squad watch` Connection
+
+**`squad watch` is the local heartbeat.** It already does 80% of what `squad-heartbeat.yml` does:
+- ✅ Triage untriaged issues (adds `squad:{member}` label)
+- ✅ Monitor PR states (draft/review/CI/merge-ready)
+- ✅ Poll on interval (default: 30 min, configurable)
+- ✅ Report board state (untriaged/assigned/drafts/CI failures/ready-to-merge)
+- ❌ Post triage comments (workflow does this)
+- ❌ Auto-assign copilot-swe-agent[bot] (requires PAT + bot API)
+
+**Key difference:** Workflow runs in GitHub Actions with PAT. Watch runs locally with `gh` CLI auth.
+
+**Can `squad watch` subsume heartbeat.yml entirely?**
+- **No** — not for copilot auto-assign (needs PAT + bot API).
+- **Yes** — for triage + PR monitoring (already implemented).
+- **Partial** — if we add comment posting (4-6 hour lift).
+
+**Recommendation:** Keep heartbeat.yml for copilot auto-assign (PAT-only feature). Enhance `squad watch` with comment posting for parity on triage behavior.
+
+---
+
+## 4. Technical Risks
+
+### What's Harder Than It Looks
+
+1. **Copilot-swe-agent[bot] assignment API** — Not exposed in `gh` CLI. Requires PAT + Octokit or raw HTTPS. Violates zero-dependency CLI goal. **Mitigation:** Keep as workflow-only feature.
+
+2. **Secret management for PAT** — CLI should not prompt for or store PATs. Workflows have secure secret storage. **Mitigation:** Do not migrate PAT-dependent workflows.
+
+3. **Comment posting at scale** — Triage comments have rich formatting (team roster, routing rules, member bios). Watch loop runs every N minutes. Posting comments on every cycle could spam issues. **Mitigation:** Only post comments when triage decision is made (same as workflow).
+
+4. **Offline story** — All workflows need GitHub API. CLI commands will fail without `gh auth login`. **Mitigation:** Document auth requirement. Already have `ghAuthenticated()` check in watch.ts.
+
+### What's Easier Than It Looks
+
+1. **Label sync** — Idempotent create-or-update. No complex parsing (roster already implemented). Just needs `gh label create/edit` loop. **Quick win.**
+
+2. **Label enforce** — No parsing needed. Pure label list manipulation. `gh-cli.ts` already has `removeLabel`. **Quick win.**
+
+3. **Triage logic** — Already implemented in `@bradygaster/squad-sdk/ralph/triage` and used by both `watch.ts` and `ralph-triage.js`. **Reuse at 100%.**
+
+4. **PR monitoring** — Already implemented in `watch.ts` (line 67-148). Returns PR board state (drafts/needs-review/changes-requested/CI failures/ready-to-merge). **Done.**
+
+---
+
+## 5. Implementation Estimate
+
+### Quick Wins (v0.8.22 — could ship today)
+
+**Total: 4-7 hours**
+
+1. **`squad labels sync`** — S (2-3 hours)
+   - Reuse `parseRoster()`, add label create/edit loop with `gh`
+   - Supports `--dry-run`, `--squad-dir`
+   - Zero new deps
+
+2. **`squad labels enforce`** — S (2-4 hours)
+   - Add `gh issue comment` wrapper to `gh-cli.ts` (5 lines)
+   - Implement mutual-exclusivity logic (pure JS, no parsing)
+   - Fetch issue labels, remove conflicts, post comment
+
+### Medium Effort (v0.8.22 stretch or v0.8.23)
+
+**Total: 4-6 hours**
+
+3. **Enhance `squad watch` with comment posting** — M (4-6 hours)
+   - Add `gh issue comment` wrapper to `gh-cli.ts` (if not done in #2)
+   - Call it from `runCheck()` in watch.ts when triage decision is made
+   - Match workflow comment format (team roster, routing reason, member info)
+   - **Result:** `squad watch` now has full parity with triage + heartbeat workflows (minus copilot auto-assign)
+
+### Heavy Lift (v0.9+ or never)
+
+**Total: 8-12 hours**
+
+4. **`squad copilot assign` (copilot-swe-agent[bot] API)** — XL (8-12 hours)
+   - Add Octokit dependency OR raw HTTPS POST wrapper (50-100 lines)
+   - Add PAT secret management (prompt or env var)
+   - Implement agent_assignment API call
+   - Error handling, fallback to basic assignment
+   - **Recommendation:** Do not migrate. Keep as workflow-only feature. Workflows already have PAT storage.
+
+---
+
+## 6. Recommendation
+
+### Ship Now (v0.8.22)
+
+1. **`squad labels sync`** — 2-3 hours. Quick win. Zero deps.
+2. **`squad labels enforce`** — 2-4 hours. Quick win. Reuses existing wrappers.
+
+### Ship Next (v0.8.23)
+
+3. **Enhance `squad watch` with comment posting** — 4-6 hours. Medium effort. Full parity with triage workflow (minus copilot auto-assign).
+
+### Do Not Migrate
+
+4. **Copilot auto-assign** (issue-assign.yml + heartbeat.yml copilot auto-assign step) — Keep as workflow-only. Requires PAT + bot API not exposed in `gh` CLI. Violates zero-dependency CLI goal.
+
+### Already Exists
+
+5. **`squad watch`** — Already shipped (v0.8.16+). Local equivalent of heartbeat.yml. Triages issues, monitors PRs. Missing comment posting (4-6 hour gap).
+
+---
+
+## 7. Summary Table
+
+| Workflow | CLI Command | Complexity | Can Migrate? | Estimate |
+|----------|-------------|------------|--------------|----------|
+| sync-squad-labels.yml | `squad labels sync` | S | ✅ Yes | 2-3 hrs (v0.8.22) |
+| squad-label-enforce.yml | `squad labels enforce` | S | ✅ Yes | 2-4 hrs (v0.8.22) |
+| squad-triage.yml | Enhance `squad watch` | M | ✅ Partial | 4-6 hrs (v0.8.23) |
+| squad-heartbeat.yml | Already `squad watch` | M | ✅ Done | 0 hrs (shipped) |
+| squad-issue-assign.yml | N/A | XL | ❌ No | Keep workflow (PAT-only) |
+
+**Total migration effort:** 8-13 hours for full CLI parity (minus copilot auto-assign).
+
+**v0.8.22 quick wins:** 4-7 hours (labels sync + enforce).
+
+**v0.8.23 polish:** 4-6 hours (watch comment posting).
+
+---
+
+## 8. Next Steps
+
+1. **Brady decides:** Ship labels commands in v0.8.22?
+2. **If yes:** Fenster implements `squad labels sync` + `squad labels enforce` (4-7 hours total).
+3. **If comment posting desired:** Add `gh issue comment` wrapper to `gh-cli.ts`, call it from watch.ts (4-6 hours).
+4. **Document:** Copilot auto-assign requires GitHub Actions + PAT. `squad watch` is local equivalent for triage + PR monitoring.
+
+---
+
+**Author:** Fenster  
+**Date:** 2026-03-07  
+**Status:** Awaiting Brady's go/no-go decision
+
+
+# Actions → CLI Migration Strategy
+**Author:** Keaton (Lead)  
+**Date:** 2026-03-07  
+**Requested by:** Brady  
+
+## Executive Summary
+
+Brady's concern is valid: **Squad is surprising users with automated GitHub Actions that consume API quota and execute without explicit user intent.** The current model treats Squad as an automated bot service rather than a user-controlled tool.
+
+**Core principle:** Squad should be a CLI-first tool that users invoke when they want it, not an always-on automation layer that reacts to every label change.
+
+**Recommendation:** Migrate 5 squad-specific workflows to CLI commands. Keep 10 standard CI/CD workflows (expected by any project). Target v0.8.22 for deprecation warnings, v0.9.0 for removal.
+
+---
+
+## Classification: All 15 Workflows
+
+### 🟢 KEEP — Standard CI/CD (10 workflows)
+
+These are expected by ANY modern project. No surprise factor. Keep as-is.
+
+| Workflow | Trigger | Why Keep |
+|----------|---------|----------|
+| **squad-ci.yml** | PR/push to dev/insider | Standard CI — every repo needs this |
+| **squad-release.yml** | Push to main | Standard release automation — tag + GitHub Release |
+| **squad-promote.yml** | workflow_dispatch only | Manual branch promotion — user-triggered |
+| **squad-main-guard.yml** | PR/push to main/preview/insider | Prevents forbidden files on release branches — safety net |
+| **squad-preview.yml** | Push to preview | Pre-release validation — standard quality gate |
+| **squad-docs.yml** | Push to main (docs/**) | Docs build/deploy to GH Pages — standard pattern |
+| **publish.yml** | Tag push (v*) | npm publish on tag — standard release flow |
+| **squad-publish.yml** | Tag push (v*) | npm publish (monorepo variant) — standard release flow |
+| **squad-insider-release.yml** | Push to insider | Insider build tagging — standard preview channel |
+| **squad-insider-publish.yml** | Push to insider | Insider npm publish — standard preview channel |
+
+**Verdict:** These workflows are **expected behavior** for a project with CI/CD. No user would be surprised that pushing to `main` triggers a release or that opening a PR runs tests. Keep all 10.
+
+---
+
+### 🟡 MIGRATE TO CLI — Squad-Specific Automation (5 workflows)
+
+These workflows execute Squad logic on GitHub events. They surprise users because they:
+- Consume GitHub API quota automatically
+- Execute AI logic without user awareness
+- Make label/assignment decisions on behalf of the user
+- Trigger on innocuous actions (adding a label)
+
+| Workflow | Trigger | Surprise Factor | CLI Replacement |
+|----------|---------|-----------------|-----------------|
+| **sync-squad-labels.yml** | Push to team.md | 🟡 Moderate — creates ~30+ labels automatically | `squad labels sync` |
+| **squad-triage.yml** | issues:[labeled] when "squad" label added | 🔴 HIGH — AI routing + label assignment + comment | `squad triage` or `squad triage <issue>` |
+| **squad-issue-assign.yml** | issues:[labeled] when squad:{member} label added | 🟡 Moderate — posts comment, assigns @copilot | `squad assign <issue> <member>` |
+| **squad-heartbeat.yml** | issues:[closed/labeled], PR:[closed], cron (disabled) | 🔴 HIGH — Ralph auto-triage every 30min (if enabled) | `squad watch` (user keeps terminal open) |
+| **squad-label-enforce.yml** | issues:[labeled] | 🟡 Moderate — removes conflicting labels, posts comments | `squad labels check <issue>` |
+
+**Total:** 5 workflows to migrate.
+
+---
+
+## Migration Architecture
+
+### 1. **sync-squad-labels.yml** → `squad labels sync`
+
+**Current behavior:** On push to `.squad/team.md`, automatically syncs ~30+ labels (squad:*, go:*, release:*, type:*, priority:*).
+
+**CLI replacement:**
+```bash
+squad labels sync
+# Reads .squad/team.md, creates/updates labels via GitHub API
+# Output: "✓ Created 12 labels, updated 18 labels"
+```
+
+**When users run it:**
+- After editing `.squad/team.md` (new member added)
+- During initial Squad setup (`squad init` could offer to run it)
+- Manually when they want to refresh label definitions
+
+**Tradeoff:** Labels won't auto-sync. Users must remember to run this.  
+**Mitigation:** `squad init` runs it automatically. `squad doctor` warns if team.md changed but labels haven't been synced.
+
+---
+
+### 2. **squad-triage.yml** → `squad triage`
+
+**Current behavior:** On "squad" label added, reads team.md + routing.md, does keyword-based routing, assigns squad:{member} label, posts triage comment.
+
+**CLI replacement:**
+```bash
+# Triage all issues with "squad" label and no squad:{member} label
+squad triage
+
+# Triage a specific issue
+squad triage 42
+
+# Output:
+# ✓ Issue #42: Assigned to Ripley (Frontend) — matches "UI component" keyword
+# ✓ Issue #43: Assigned to @copilot (good fit) — matches "bug fix" keyword
+```
+
+**When users run it:**
+- After new issues are labeled with "squad"
+- During daily standup / triage sessions
+- As part of a larger workflow (`squad watch` could include this)
+
+**Tradeoff:** Triage doesn't happen automatically when label is added.  
+**Mitigation:** `squad watch` can poll for untriaged issues and notify the user. User still invokes triage explicitly.
+
+---
+
+### 3. **squad-issue-assign.yml** → `squad assign <issue> <member>`
+
+**Current behavior:** On squad:{member} label added, posts assignment comment. If squad:copilot, assigns copilot-swe-agent[bot] via PAT.
+
+**CLI replacement:**
+```bash
+# Assign issue to a squad member (adds label, posts comment)
+squad assign 42 ripley
+
+# Assign to @copilot (adds label, posts comment, assigns bot)
+squad assign 42 copilot
+
+# Output:
+# ✓ Issue #42 assigned to Ripley (Frontend)
+# ✓ Posted assignment comment
+```
+
+**When users run it:**
+- After manual triage (they decide who should work on it)
+- As part of `squad triage` output (suggests assignments, user confirms)
+
+**Tradeoff:** Assignment doesn't happen automatically when label is added.  
+**Mitigation:** `squad triage` can assign in one step (triage + assign). User still has control.
+
+---
+
+### 4. **squad-heartbeat.yml** → `squad watch`
+
+**Current behavior:** Cron every 30min (disabled), or on issue/PR events. Runs ralph-triage.js, applies triage decisions, auto-assigns @copilot.
+
+**CLI replacement:**
+```bash
+# Watch mode — keeps terminal open, polls for new work
+squad watch
+
+# Output:
+# 🔄 Watching for new issues...
+# [10:42] New issue #45: "Add login form validation"
+#         → Suggested: @copilot (good fit)
+#         Run `squad triage 45` to assign?
+# [10:45] Issue #42 closed by Ripley
+# [10:50] PR #38 merged to main
+```
+
+**When users run it:**
+- During active work sessions
+- On a dedicated terminal/tmux pane
+- In CI (optional — they opt-in)
+
+**Tradeoff:** No background automation. User must keep `squad watch` running.  
+**Mitigation:** Users who want automation can keep `squad watch` in a tmux pane or run it in CI. Users who DON'T want automation aren't surprised.
+
+---
+
+### 5. **squad-label-enforce.yml** → `squad labels check`
+
+**Current behavior:** On any label added, enforces mutual exclusivity (go:, release:, type:, priority:), removes conflicts, posts comments.
+
+**CLI replacement:**
+```bash
+# Check label consistency for all open issues
+squad labels check
+
+# Check a specific issue
+squad labels check 42
+
+# Output:
+# ⚠️ Issue #42: Multiple go: labels detected (go:yes, go:no)
+#    Run `squad labels fix 42` to resolve
+```
+
+**When users run it:**
+- Before triage sessions
+- As part of `squad doctor` (health check)
+- Manually when they notice conflicting labels
+
+**Tradeoff:** Conflicting labels won't be auto-removed.  
+**Mitigation:** `squad labels check` is fast. `squad doctor` includes it. Users can run it proactively.
+
+---
+
+## Tradeoffs: What Do We LOSE?
+
+| Lost Capability | Impact | Mitigation |
+|----------------|--------|------------|
+| **Auto-sync labels on team.md push** | Labels may be out of sync with team roster | `squad doctor` warns. `squad init` syncs automatically. |
+| **Auto-triage on "squad" label** | Issues sit in triage inbox longer | `squad watch` notifies. `squad triage` is one command. |
+| **Auto-assign on squad:{member} label** | Manual step to assign after labeling | `squad triage` does both in one step. |
+| **Ralph heartbeat (cron auto-triage)** | No background automation | `squad watch` in tmux/screen. Or: users run `squad triage` daily. |
+| **Auto-enforce label rules** | Conflicting labels may exist temporarily | `squad labels check` is fast. `squad doctor` includes it. |
+
+**Key insight:** We lose automatic execution, but GAIN user control and transparency. Users aren't surprised by API usage or AI decisions happening behind their back.
+
+---
+
+## Migration Path: Phased Rollout
+
+### **Phase 1: v0.8.22 (Deprecation Warnings)**
+
+- Add deprecation warnings to all 5 workflows (at the top of each file):
+  ```yaml
+  # ⚠️ DEPRECATION WARNING: This workflow will be removed in v0.9.0
+  # Use `squad labels sync` instead (see docs/migration/actions-to-cli.md)
+  ```
+- Implement CLI commands:
+  - `squad labels sync`
+  - `squad triage [<issue>]`
+  - `squad assign <issue> <member>`
+  - `squad watch` (basic polling loop)
+  - `squad labels check [<issue>]`
+- Ship docs: `docs/migration/actions-to-cli.md` (migration guide)
+- Announce in CHANGELOG.md: "GitHub Actions workflows are deprecated. Migrate to CLI commands."
+
+**Timeline:** v0.8.22 ships with deprecation warnings + CLI commands. Users have time to adapt.
+
+---
+
+### **Phase 2: v0.9.0 (Remove Workflows)**
+
+- Remove all 5 workflows from `.github/workflows/`
+- Remove from template bundles (`.squad/templates/workflows/`)
+- Update `squad init` to NOT install these workflows
+- Add `squad upgrade` to remove deprecated workflows from existing repos
+
+**Timeline:** v0.9.0 removes workflows entirely. CLI commands are the only path.
+
+---
+
+### **Phase 3: v0.9.x (Optional Automation)**
+
+- Add opt-in GitHub Actions workflow for users who want automation:
+  ```yaml
+  name: Squad CLI Runner (opt-in)
+  on:
+    issues: [labeled]
+  jobs:
+    run-cli:
+      - run: npx @bradygaster/squad-cli triage ${{ github.event.issue.number }}
+  ```
+- Users who want automation can install this workflow themselves.
+- Key difference: They CHOOSE to install it. Not a default.
+
+**Timeline:** Post-v0.9.0. Optional path for users who miss automation.
+
+---
+
+## The "Zero Actions Required" Vision
+
+**Can Squad work with ZERO custom Actions (just standard CI)?**
+
+**YES.** Here's what it looks like:
+
+### Minimal GitHub Actions Setup
+- **squad-ci.yml** — Test on PR (standard)
+- **squad-release.yml** — Tag + release on main push (standard)
+- **squad-docs.yml** — Build docs on main push (standard)
+
+**That's it.** 3 workflows. Zero Squad-specific logic in GitHub Actions.
+
+### User Workflow (CLI-First)
+```bash
+# 1. New issue arrives (via GitHub UI or gh CLI)
+# 2. User triages at their terminal
+squad triage
+
+# Output:
+# ✓ Issue #42: Assigned to Ripley (Frontend)
+# ✓ Issue #43: Assigned to @copilot (good fit)
+
+# 3. User watches for new work (optional)
+squad watch
+# Polls in background, notifies on new issues
+
+# 4. User checks health periodically
+squad doctor
+# ✓ Labels synced
+# ✓ No conflicting labels
+# ⚠️ 3 untriaged issues in inbox
+```
+
+**Benefits:**
+- **Zero API usage surprises** — users invoke Squad when they want it
+- **Zero hidden costs** — no cron jobs running every 30min
+- **Full transparency** — users see Squad's decisions as they happen
+- **User control** — users can override triage decisions before they're applied
+
+**This is the right model.** Squad is a tool users invoke, not a bot that watches them.
+
+---
+
+## Recommendation
+
+**Migrate all 5 squad-specific workflows to CLI commands.**
+
+1. **v0.8.22** — Add deprecation warnings + CLI commands. Users have time to adapt.
+2. **v0.9.0** — Remove workflows entirely. CLI-first is the only path.
+3. **Post-v0.9.0** — Add opt-in automation for users who want it.
+
+**Core belief:** Squad should be a CLI-first tool that users control, not an automation layer that surprises them. This migration aligns with that vision.
+
+---
+
+## Implementation Notes
+
+### CLI Command Structure
+```
+squad labels sync          # Sync labels from team.md
+squad labels check [issue] # Check for conflicting labels
+squad labels fix <issue>   # Fix conflicting labels
+
+squad triage [issue]       # Triage issue(s) using routing rules
+squad assign <issue> <member> # Assign issue to squad member
+
+squad watch               # Watch for new issues (polling loop)
+squad doctor              # Health check (labels, triage queue, etc.)
+```
+
+### UX Principles
+- **Explicit is better than implicit** — users invoke Squad when they want it
+- **One command does one thing** — no hidden side effects
+- **Fast feedback** — commands complete in <1s for single issues
+- **Batch operations** — `squad triage` without args processes all untriaged
+
+### Technical Approach
+- All CLI commands use GitHub API (via Octokit)
+- `squad watch` uses polling (every 30s) with efficient API usage (If-None-Match headers)
+- `squad triage` uses same routing logic as current `squad-triage.yml` (reuse ralph-triage.js)
+- `squad doctor` aggregates multiple checks (labels, triage, etc.)
+
+---
+
+## Appendix: Current Workflow Triggers
+
+| Workflow | Trigger | API Calls/Event |
+|----------|---------|-----------------|
+| sync-squad-labels.yml | Push to team.md | ~30 (create/update labels) |
+| squad-triage.yml | issues:[labeled] "squad" | ~5-10 (read files, add labels, post comment) |
+| squad-issue-assign.yml | issues:[labeled] "squad:*" | ~3-5 (post comment, assign) |
+| squad-heartbeat.yml | Cron every 30min (disabled) | ~10-50 (depends on open issues) |
+| squad-label-enforce.yml | issues:[labeled] any label | ~2-5 (remove conflicting labels, post comment) |
+
+**Total:** If heartbeat were enabled, Squad would make 50+ API calls every 30 minutes, even if no real work happened. This is the core problem Brady identified.
+
+
+
+# CI/CD Impact Assessment: GitHub Actions vs. CLI Migration
+
+**Date:** 2026-03-15 | **Author:** Kobayashi (Git & Release) | **Status:** Analysis Complete
+
+---
+
+## Executive Summary
+
+Brady seeks to reduce GitHub Actions usage by migrating automation to Squad CLI. This assessment identifies which workflows are **load-bearing infrastructure** (must stay as Actions) vs. **migration candidates** that can move to CLI-side automation.
+
+**Bottom Line:** ~90 actions-minutes/month can be eliminated by migrating 5 squad-specific workflows (label sync, triage, assignments, label enforcement). However, **9 workflows must remain as Actions** because they provide event-driven guardrails that cannot be replicated CLI-side.
+
+---
+
+## Part 1: Actions Minutes Analysis
+
+### Monthly Actions Consumption by Workflow
+
+| Workflow | Category | Trigger | Est. Min/Month | Notes |
+|----------|----------|---------|----------------|-------|
+| **squad-ci.yml** | CI | PR changes + dev push | ~120 | Runs per PR update, most frequent trigger |
+| **squad-release.yml** | Release | Push to main (once/release) | ~15 | Tag creation + GitHub Release |
+| **squad-promote.yml** | Release | Manual dispatch | ~20 | dev→preview→main pipeline |
+| **squad-main-guard.yml** | CI | PR to main + push | ~10 | File pattern guards (fast) |
+| **squad-preview.yml** | CI | Push to preview | ~15 | Full test suite validation |
+| **squad-publish.yml** | Publish | Tag push | ~30 | Build + npm publish (2x jobs) |
+| **squad-insider-release.yml** | Release | Push to insider | ~15 | Tag creation only |
+| **squad-insider-publish.yml** | Publish | Push to insider | ~30 | Build + npm publish |
+| **sync-squad-labels.yml** | Squad | team.md changes | ~1 | Lightweight label sync |
+| **squad-triage.yml** | Squad | Issue labeled | ~2 | Script runs, ~50-100 issues/month |
+| **squad-issue-assign.yml** | Squad | Issue labeled | ~2 | Script runs, ~50-100 issues/month |
+| **squad-heartbeat.yml** | Squad | Issue/PR closed, manual | ~5 | Ralph triage script (when enabled) |
+| **squad-label-enforce.yml** | Squad | Issue labeled | ~2 | Label mutual exclusivity enforcement |
+| **squad-docs.yml** | Docs | Manual + docs push | ~5 | Rarely triggered (on demand mostly) |
+
+### Cost Breakdown
+
+- **CI/Release (MUST STAY):** ~215 minutes/month — essential event-driven guardrails
+- **Squad-Specific (MIGRATE):** ~12 minutes/month — low cost but high synchronization burden
+- **Total:** ~227 minutes/month (well under GitHub's 3000-min free tier for public repos)
+
+**Finding:** This repository is **not Actions-minute-constrained**. Cost is not the primary driver; **complexity & maintenance** is.
+
+---
+
+## Part 2: Workflow Dependencies & Orchestration Chain
+
+### Dependency Graph
+
+```
+dev branch (squad-ci.yml) 
+    ↓
+main branch (squad-ci.yml + squad-main-guard.yml)
+    ↓
+squad-release.yml (validates version, creates tag v*)
+    ↓
+squad-publish.yml (triggered by tag, publishes to npm)
+    ↓
+GitHub Release + npm distribution (end user benefit)
+```
+
+### Event-Driven Orchestration
+
+| Workflow | Trigger | Depends On | Blocks | Critical? |
+|----------|---------|-----------|--------|-----------|
+| **squad-ci.yml** | PR open/sync, dev push | — | All downstream | ✅ YES |
+| **squad-main-guard.yml** | PR to main/preview | — | Release process | ✅ YES |
+| **squad-release.yml** | Push to main | squad-main-guard + squad-ci | squad-publish | ✅ YES |
+| **squad-promote.yml** | Manual workflow_dispatch | — | Follows main merge | ⚠️ MANUAL |
+| **squad-publish.yml** | Tag push (v*) | All CI/tests upstream | npm distribution | ✅ YES |
+| **sync-squad-labels.yml** | team.md changes | — | squad-triage | ⚠️ AUTOMATION |
+| **squad-triage.yml** | Issue labeled "squad" | sync-squad-labels output | squad-issue-assign | ⚠️ AUTOMATION |
+| **squad-issue-assign.yml** | Issue labeled "squad:*" | squad-triage | @copilot work start | ⚠️ AUTOMATION |
+| **squad-heartbeat.yml** | Issue/PR closed, manual | — | Auto-triage | ⚠️ AUTOMATION |
+| **squad-label-enforce.yml** | Issue labeled | — | Triage feedback | ⚠️ AUTOMATION |
+
+### Cross-Workflow Triggers (Implicit Dependencies)
+
+1. **squad-triage → squad-issue-assign**: Triage adds `squad:{member}` label → triggers assignment workflow
+2. **squad-label-enforce → feedback loop**: Enforces mutual exclusivity → posts triage updates
+3. **squad-release → squad-publish**: Successful main push creates tag → triggers publish
+
+**Finding:** squad-release + squad-publish form an **implicit pipeline** — removing either breaks the release chain.
+
+---
+
+## Part 3: Load-Bearing Infrastructure (MUST STAY as Actions)
+
+### Why These Workflows Cannot Move to CLI
+
+#### 1. **squad-ci.yml** — PR/Push Event Guard
+- **Trigger:** Pull request open/sync + dev push
+- **Function:** Build + test on every code change
+- **Why it must be Actions:**
+  - Must run **before** merge decisions (PR gates, branch protection)
+  - Event-driven: no other way to intercept PR lifecycle events
+  - Results **feed into GitHub's merge protection logic**
+  - Failure blocks PR merge (security/correctness gate)
+
+#### 2. **squad-main-guard.yml** — Protected Branch Enforcement
+- **Trigger:** PR to main/preview/insider, push to main/preview/insider
+- **Function:** Prevents `.squad/`, `.ai-team/`, internal-only files from reaching production
+- **Why it must be Actions:**
+  - **Enforcement happens at GitHub API layer** — no CLI equivalent
+  - Runs even if developer bypasses local git hooks
+  - Final validation before release branches merge
+  - State corruption risk if this fails
+
+#### 3. **squad-release.yml** — Tag + Release Creation
+- **Trigger:** Push to main (automatic version detection)
+- **Function:** Create semantic version tag, GitHub Release, generate release notes
+- **Why it must be Actions:**
+  - Runs on every main merge (automated release)
+  - Creates artifacts that trigger downstream squad-publish.yml
+  - If moved to CLI, requires manual invocation (breaks release automation)
+  - **Dependency:** squad-publish.yml is triggered **only** by tag push
+
+#### 4. **squad-publish.yml** — npm Distribution Gate
+- **Trigger:** Tag push (v*)
+- **Function:** Build monorepo, publish squad-sdk + squad-cli to npm
+- **Why it must be Actions:**
+  - Distributes to **public npm registry** (external system)
+  - Final node in release pipeline — runs only after tag exists
+  - If moved to CLI, end users never receive updates
+
+#### 5. **squad-promote.yml** — Branch Promotion Pipeline
+- **Trigger:** Manual `workflow_dispatch`
+- **Function:** dev→preview→main with forbidden-path stripping
+- **Why it must be Actions:**
+  - Complex, **sequential git operations** that require shell environment
+  - Dry-run capability (shows what _would_ happen) — essential for release safety
+  - Manual trigger allows human decision points
+
+#### 6. **squad-preview.yml** — Pre-Release Validation
+- **Trigger:** Push to preview
+- **Function:** Verify version consistency, CHANGELOG entries, no internal files
+- **Why it must be Actions:**
+  - Validates **release readiness** before main merge
+  - Final "go/no-go" checkpoint for publication
+  - Prevents bad releases from reaching public channels
+
+#### 7. **squad-docs.yml** — Documentation Build & Deploy
+- **Trigger:** Manual + docs changes on main
+- **Function:** Build markdown docs, deploy to GitHub Pages
+- **Why it must be Actions:**
+  - **GitHub Pages deployment** requires Actions API (or setup-pages)
+  - Public-facing documentation delivery
+  - Not CLI-suited (requires repository deployment permissions)
+
+#### 8. **squad-insider-release.yml** — Pre-Release Channel
+- **Trigger:** Push to insider
+- **Function:** Create insider tags (v*.insider+SHA), GitHub Release
+- **Why it must be Actions:**
+  - Supports insider/development release channel
+  - Tag creation must happen at push time (cannot be manual)
+
+#### 9. **squad-insider-publish.yml** — Insider npm Distribution
+- **Trigger:** Push to insider
+- **Function:** Publish squad-sdk + squad-cli to npm with `insider` tag
+- **Why it must be Actions:**
+  - Final distribution step for pre-release channel
+  - Mirrors squad-publish.yml for insider builds
+
+### The Core Constraint: Event-Driven Guarantees
+
+**GitHub Actions provides these guarantees that CLI cannot:**
+
+1. **Atomicity**: Workflow runs **exactly once** per trigger event (no duplicates, no misses)
+2. **Immutability**: Events are recorded; workflows cannot be skipped retroactively
+3. **Authorization**: Actions run with repo access token (PAT or GITHUB_TOKEN) — centralized permission control
+4. **Branch Protection Integration**: Workflow status **blocks merges** via PR checks (native GitHub API)
+5. **Tag Triggers**: Tag push events are instant and guaranteed (CLI has no hook into git server)
+
+**CLI automation lacks these guarantees:**
+- Requires manual invocation (susceptible to user error)
+- No built-in authorization (relies on user's local git credentials)
+- Cannot integrate with branch protection rules
+- Cannot react to remote events (only local ones)
+
+---
+
+## Part 4: Migration Candidates (Squad-Specific Workflows)
+
+### Workflows That Should Migrate to CLI
+
+#### 1. **sync-squad-labels.yml** → `squad sync-labels`
+- **Current:** Triggered by team.md changes
+- **Proposal:** Move to CLI command (could also run on init + periodic manual trigger)
+- **CLI Implementation:** Read team.md, iterate GitHub API to create/update labels
+- **Risks:** Low — idempotent operation, no branch protection dependency
+- **Migration Path:** Run as part of `squad upgrade`, available via `squad sync-labels` command
+
+#### 2. **squad-triage.yml** → `squad triage`
+- **Current:** Triggered by "squad" label on issue
+- **Proposal:** Move to CLI command that runs on-demand or via Ralph (monitor) agent
+- **CLI Implementation:** Detect issues with "squad" label, run routing logic, add member labels + comments
+- **Risks:** Low — does not modify protected state, user can run manually
+- **Note:** Ralph (work monitor) already implements smart triage; could consume this logic
+
+#### 3. **squad-issue-assign.yml** → `squad assign`
+- **Current:** Triggered by "squad:{member}" label on issue
+- **Proposal:** Move to CLI command, combines with triage workflow
+- **CLI Implementation:** Detect issues with squad:* labels, post assignment comments, optionally assign @copilot via PAT
+- **Risks:** Medium — requires COPILOT_ASSIGN_TOKEN (PAT) for copilot-swe-agent assignment
+- **Migration Path:** CLI can handle label detection + comments; copilot assignment remains as optional GitHub workflow step
+
+#### 4. **squad-heartbeat.yml** → `squad heartbeat` / Ralph monitor
+- **Current:** Triggered by issue/PR close, labeled events, + manual dispatch
+- **Proposal:** Ralph (the work monitor agent) already implements smart triage; fold this into Ralph's periodic monitor loop
+- **CLI Implementation:** Ralph already has access to team.md, routing rules, issue data
+- **Risks:** Low — currently disabled in workflow anyway (cron commented out)
+- **Note:** Ralph can be invoked manually OR integrated with Copilot CLI agent lifecycle
+
+#### 5. **squad-label-enforce.yml** → `squad validate-labels`
+- **Current:** Triggered by issue labeled (any label event)
+- **Proposal:** Move to CLI command, called by triage workflow or manual enforcement
+- **CLI Implementation:** Given an issue, check label namespaces (go:, release:, type:, priority:) for mutual exclusivity, remove conflicts
+- **Risks:** Low — idempotent, modifies issue labels only (no protected state)
+- **Migration Path:** Can be called as part of squad-triage → removes conflicting labels before applying member assignment
+
+### Migration Risk Matrix
+
+| Workflow | Complexity | State Risk | Race Conditions | Human Review | Recommendation |
+|----------|-----------|-----------|-----------------|---------------|-----------------|
+| **sync-squad-labels.yml** | Low | None | None | No | ✅ MIGRATE |
+| **squad-triage.yml** | Medium | Low | Possible (concurrent issues) | Yes (lead review) | ✅ MIGRATE |
+| **squad-issue-assign.yml** | Medium | Low | Possible (label race) | Yes (PAT required) | ✅ MIGRATE |
+| **squad-heartbeat.yml** | Medium | Low | None (async monitor) | Yes (Ralph logic) | ✅ MIGRATE (to Ralph) |
+| **squad-label-enforce.yml** | Low | None | None | No | ✅ MIGRATE |
+
+**Total Time Savings:** ~12 Actions minutes/month (negligible for cost, but **reduces maintenance burden**)
+
+---
+
+## Part 5: The `squad init` Impact
+
+### Current Flow: squad init → Install Workflows
+
+```
+squad init [repo]
+  ├─ Detect project type (Node.js, Python, Go, etc.)
+  ├─ Copy .squad/ template files
+  │  ├─ team.md
+  │  ├─ routing.md
+  │  ├─ charter.md
+  │  └─ other YAML configs
+  ├─ Copy .github/workflows/ from templates/workflows/
+  │  ├─ squad-ci.yml (project-type sensitive stub)
+  │  ├─ squad-release.yml (project-type sensitive)
+  │  ├─ squad-promote.yml
+  │  ├─ squad-main-guard.yml
+  │  ├─ squad-preview.yml
+  │  ├─ squad-docs.yml
+  │  ├─ squad-publish.yml
+  │  ├─ sync-squad-labels.yml
+  │  ├─ squad-triage.yml
+  │  ├─ squad-issue-assign.yml
+  │  ├─ squad-heartbeat.yml
+  │  └─ squad-label-enforce.yml
+  └─ Show team onboarding (emoji ceremony)
+```
+
+### Impact of Selective Migration
+
+**Option A: Remove All Squad-Specific Workflows from init**
+
+```diff
+  squad init [repo]
+    ├─ Install CI/Release workflows (9 workflows)
+    ├─ Skip squad-specific workflows (5 workflows)
+    └─ Post message: "To enable smart triage, run: squad init-automation"
+```
+
+**Implications:**
+- Simpler `squad init` — no automation magic, team must opt-in
+- Users who want triage must run second command: `squad init-automation`
+- Clearer separation: **core** (CI/Release) vs. **optional** (team automation)
+
+**Option B: Keep All, Make Workflows Optional in Init**
+
+```
+squad init [repo] --with-automation
+squad init [repo] --automation=none  # skip squad-specific
+```
+
+**Implications:**
+- Backward compatible (existing users' behavior unchanged)
+- First-time users get full automation by default
+- Power users can disable triage workflows if not needed
+
+**Option C: Hybrid — Install Squad Workflows, Disable Some by Default**
+
+```
+squad init [repo]
+  ├─ Install ALL workflows
+  ├─ Disable (comment out triggers on):
+  │  ├─ squad-heartbeat.yml (cron already commented)
+  │  ├─ squad-triage.yml (comments say "disabled pre-migration")
+  └─ Enable on demand via: squad enable-heartbeat, squad enable-triage
+```
+
+### Recommended Approach: **Lazy Automation**
+
+**Proposal:** Keep workflows in init, but add lifecycle flags:
+
+```yaml
+# .squad/config.json
+{
+  "automation": {
+    "ci": true,        // Always enabled
+    "release": true,   // Always enabled
+    "triage": false,   // Disabled by default — opt-in
+    "heartbeat": false // Disabled — requires Ralph enable
+  }
+}
+```
+
+**Benefits:**
+- init remains simple (no conditional flags)
+- Team leads can enable triage workflows incrementally
+- Reduces "magic" for teams who don't want it
+- squad upgrade can toggle these flags
+
+---
+
+## Part 6: Backward Compatibility & Migration Strategy
+
+### Scenario 1: Existing Repos with 15 Workflows
+
+**Problem:** User has all 15 workflows. If we remove squad-specific ones from init, their repo still has old workflows running.
+
+**Solution: `squad upgrade` with workflow management**
+
+```bash
+# Update Squad CLI to latest
+npm install -g @bradygaster/squad-cli@latest
+
+# Then upgrade repo workflows
+squad upgrade --workflows
+
+# Shows what changed:
+# ✅ Updated squad-ci.yml (v1 schema)
+# ⏭️ Deprecated: squad-triage.yml (moving to CLI)
+# ⏭️ Deprecated: squad-heartbeat.yml (moving to Ralph)
+# Run: squad migrate-automation --help
+```
+
+### Recommended Transition Timeline
+
+| Phase | Action | Timeline |
+|-------|--------|----------|
+| **Phase 1** | Document: "Migration path for squad automation to CLI" | v0.9.0 |
+| **Phase 2** | Implement: `squad triage`, `squad assign`, `squad sync-labels` as CLI commands | v1.0.0 |
+| **Phase 3** | Add deprecation warnings to squad-specific workflows | v1.0.0 |
+| **Phase 4** | `squad upgrade --remove-deprecated-workflows` flag | v1.1.0 |
+| **Phase 5** | Remove deprecated workflows from init (new repos only) | v1.1.0 |
+
+### Migration Checklist for Users
+
+**If you have squad-triage.yml running:**
+1. Wait for `squad triage` CLI command (v1.0.0+)
+2. Test: `squad triage --dry-run` on your repo
+3. Remove squad-triage.yml from .github/workflows/
+4. Add `squad triage` to your automation schedule (manual or cron)
+
+**If you have squad-heartbeat.yml running:**
+1. Ralph agent will handle smart triage (v1.0.0+)
+2. Remove squad-heartbeat.yml when ready
+3. Enable Ralph monitor: `squad enable-ralph`
+
+---
+
+## Part 7: State Corruption Risks
+
+### Which Workflows Modify State?
+
+| Workflow | State Modified | Risk Level | Mitigation |
+|----------|----------------|-----------|-----------|
+| **squad-ci.yml** | None (read-only) | Low | Test failures are visible |
+| **squad-release.yml** | Git tags, GitHub Releases | Critical | Version verification, dry-run |
+| **squad-promote.yml** | Git branches | Critical | Dry-run mode, human approval |
+| **squad-main-guard.yml** | None (blocks merges) | None | Enforcement only |
+| **sync-squad-labels.yml** | GitHub labels | Low | Idempotent, can re-sync |
+| **squad-triage.yml** | Issue labels, comments | Low | Can be corrected manually |
+| **squad-issue-assign.yml** | Issue assignees, comments | Low | Can be corrected manually |
+| **squad-heartbeat.yml** | Issue labels, comments | Low | Async, low severity |
+| **squad-label-enforce.yml** | Issue labels | Low | Idempotent |
+
+### Critical Workflows (State Corruption Risk)
+
+1. **squad-release.yml**: Creates git tags that trigger downstream pipeline
+   - Risk: Duplicate tags, malformed versions
+   - Mitigation: Version validation (must exist in CHANGELOG.md) before tagging
+
+2. **squad-promote.yml**: Merges between branches, strips forbidden paths
+   - Risk: Lost commits, wrong paths stripped
+   - Mitigation: Dry-run preview, manual approval, git log verification
+
+3. **squad-main-guard.yml**: Prevents merges with forbidden paths
+   - Risk: If bypassed, corruption spreads to public releases
+   - Mitigation: Must remain on main branch (non-removable, non-disabled)
+
+### Orphaned Workflow Detection
+
+**Problem:** Developer deletes squad-triage.yml from their branch, but it still runs because .github/workflows/ is read from main.
+
+**Solution:** None required
+- Workflows are read from the **default branch** (main) at runtime
+- Deleting from a feature branch has no effect
+- Only `squad upgrade --remove-deprecated-workflows` removes repo-wide
+
+---
+
+## Part 8: Backward Compatibility Matrix
+
+### What Changes for Each User Segment?
+
+| User Segment | Current Behavior | After Migration | Action Required |
+|--------------|-----------------|-----------------|-----------------|
+| **New Users** | `squad init` installs 15 workflows | init installs 9 core workflows | None (automatic) |
+| **Existing Teams** | 15 workflows in .github/workflows/ | Workflows persist; deprecated ones marked | Squad upgrade notices |
+| **Triage Users** | squad-triage.yml runs on issues | CLI: manual `squad triage` or Ralph monitor | Opt-in to CLI command |
+| **Heartbeat Users** | squad-heartbeat.yml runs on schedule | Ralph monitor (when enabled) | Enable Ralph |
+| **Non-Users** | Only CI/Release workflows matter | No change | No change |
+
+### Compatibility Guarantee
+
+**We WILL NOT break existing setups:**
+- Old workflows continue to work (backward compatible)
+- New repos use streamlined workflow set (forward compatible)
+- Deprecation warnings give 1+ release cycles notice
+- Migration tools (squad upgrade) handle transition
+
+---
+
+## Recommendations
+
+### For Brady (Project Owner)
+
+1. **Approve migration path** (5 workflows → CLI)
+   - Reduces Actions complexity without losing functionality
+   - Maintains load-bearing infrastructure (CI/Release/Main-Guard)
+   - Timeline: v0.9 (planning) → v1.0 (implementation) → v1.1 (cleanup)
+
+2. **Keep 9 critical workflows as Actions**
+   - They provide guardrails that cannot be replicated CLI-side
+   - Event-driven execution is non-negotiable for CI/Release
+   - Cost is negligible (well under 3000-min free tier)
+
+3. **Implement lazy automation** in squad init
+   - Add `automation` config flag to .squad/config.json
+   - Default: CI + Release enabled, Squad-specific disabled
+   - Reduce onboarding cognitive load
+
+### For Integration Teams
+
+1. **CLI commands to implement** (v1.0.0):
+   - `squad triage` — Run routing logic on open issues
+   - `squad assign` — Assign issues to team members
+   - `squad sync-labels` — Sync labels from team.md
+   - `squad validate-labels` — Enforce label mutual exclusivity
+
+2. **Ralph integration** (v1.0.0):
+   - Ralph monitor loop runs smart triage
+   - Replaces squad-heartbeat.yml event triggers
+   - Still manual-invokable via CLI
+
+3. **Deprecation strategy** (v0.9.0):
+   - Document in CLI README: "squad-triage.yml will move to CLI in v1.0"
+   - Add warnings to deprecated workflows in init output
+   - Provide `squad migrate-automation` helper command
+
+### For Release Management
+
+1. **Workflows that MUST stay on main**:
+   - squad-ci.yml (branch protection)
+   - squad-main-guard.yml (forbidden file guard)
+   - squad-release.yml (tag creation)
+   - squad-publish.yml (npm distribution)
+
+2. **Version gates to enforce**:
+   - CHANGELOG.md entry must exist before tag
+   - .squad/ files must be stripped from preview branch
+   - No tag created without version validation
+
+3. **Disaster recovery**:
+   - If squad-release.yml tags wrong version, use `git tag -d` + `git push origin --delete` to recover
+   - If squad-promote.yml merges wrong commits, use `git revert` to undo merge commit
+
+---
+
+## Conclusion
+
+**The case for migration:**
+- ✅ 5 squad-specific workflows (12 minutes/month) can move to CLI
+- ✅ Reduces Actions surface area without losing functionality
+- ✅ Improves team autonomy (CLI tools under their control)
+- ✅ Maintains backward compatibility (gradual, opt-in transition)
+
+**The case for keeping 9 workflows:**
+- ✅ CI/Release/Main-Guard workflows are event-driven guardrails
+- ✅ Cannot be replicated CLI-side (GitHub API integration needed)
+- ✅ Block merges at branch protection layer (non-negotiable)
+- ✅ Cost is negligible (not a constraint)
+
+**Bottom line:** Migrate squad-specific automation to CLI for maintainability; keep critical CI/Release workflows as Actions for correctness.
+
+---
+
+## References
+
+- `.squad/agents/kobayashi/history.md` — Release coordination history
+- `.squad/decisions.md` — Team decisions on workflows, versioning
+- `.squad/team.md` — Team roster and capabilities
+- `.squad/routing.md` — Work routing rules
+- `packages/squad-cli/src/cli/core/workflows.ts` — Workflow generation logic
+- `packages/squad-cli/src/cli/core/init.ts` — Init command implementation
+- `.github/workflows/*.yml` — All 15 active workflows
+
+
+# Customer Impact Analysis: GitHub Actions Automation vs. CLI-First Shift
+
+**Analysis by:** McManus (DevRel)  
+**Date:** 2026-03-11  
+**Context:** Brady raised concern that Squad's automatic GitHub Actions installation during `squad init` creates surprise friction for customers. This analysis evaluates whether moving to CLI-first (with opt-in Actions) is the right call.
+
+---
+
+## 1. The Surprise Factor — User Perspective
+
+### Current State (Status Quo)
+A developer runs `squad init` in their repo. The CLI installs 5 Squad-specific workflows:
+1. **sync-squad-labels.yml** — triggers on every `.squad/team.md` push
+2. **squad-triage.yml** — fires on every issue label event (looking for `squad` label)
+3. **squad-issue-assign.yml** — fires on every `squad:*` label
+4. **squad-label-enforce.yml** — enforces mutual exclusivity on EVERY label event
+5. **squad-heartbeat.yml** — Ralph's triage engine (cron disabled, but fires on issue/PR close events)
+
+**The "Oh No" Moment:**
+- User runs `squad init` ✅ 
+- User looks at their Actions tab for the first time after a day of active labeling
+- They see **10–20 workflow runs** in the Actions history from Squad operations they didn't explicitly ask for
+- **Mental model breaks:** "I didn't start these. Why is my Actions tab full? Is Squad spamming my quota? Am I going to get billed?"
+- User experiences **trust deficit** — they feel out of control
+
+### Why This Matters for DevRel
+The Actions tab is **highly visible** and **highly suspicious** to new users. GitHub makes it front-and-center in the repo UI. The first impression is: *automated magic I didn't authorize*. This hits **perception of transparency** (a core value for dev tools).
+
+---
+
+## 2. Billing Reality — Is the Concern Valid?
+
+### GitHub Actions Quota
+- **Free repos:** 2,000 minutes/month (unlimited public actions on public runners)
+- **Pro repos (private):** 3,000 minutes/month
+- **Each workflow run on ubuntu-latest:** ~30–60 seconds (measured from recent Squad runs)
+
+### Realistic Monthly Impact
+**Scenario: Active open-source repo with moderate team**
+- 20 issues/month created
+- 5 issues closed/month  
+- Average 3 label changes per issue (triage → assignment → go:yes)
+- 10 PRs/month with label changes
+
+**Monthly workflow run count:**
+- `sync-squad-labels`: 4 runs (team.md updated ~1/week) = 4 × 0.5min = 2 min
+- `squad-triage`: 20 runs (label squad) + 50 runs (squad:* labels + enforce) = 70 runs × 0.5min = 35 min
+- `squad-label-enforce`: ~80 runs (cascading from all labeling) × 0.5min = 40 min
+- `squad-heartbeat`: ~15 runs (issue close/PR close events) × 1min = 15 min
+- **Total:** ~92 minutes/month
+
+**Verdict:** Not a quota issue for most users. Even teams with 50+ issues/month would consume <200 min.
+
+**BUT: The perception problem is REAL.** Users see unfamiliar automation and assume it will be expensive or has hidden costs. **Trust > math.**
+
+---
+
+## 3. CLI-First Message — The Narrative
+
+### The Case for "CLI-First"
+**Message:** "Squad puts *you* in control. No surprise automations. You decide when and how Squad runs."
+
+This reframes the value prop:
+- ✅ Transparency — you see every command you run
+- ✅ Control — you decide your team's workflow, not Squad
+- ✅ Lean — zero background noise by default
+- ✅ Opt-in — power users can add automation later
+
+### Getting-Started UX Change
+
+**Current (Actions-First):**
+```
+$ squad init
+→ Installs .squad/ structure
+→ Installs 5 GitHub Actions workflows
+→ User discovers workflows running in Actions tab (surprise!)
+→ User questions: "Why? Should I turn these off?"
+```
+
+**New (CLI-First):**
+```
+$ squad init
+→ Installs .squad/ structure (NO workflows)
+→ Shows: "Squad is ready. Use 'squad triage' to label issues manually."
+→ User runs: $ squad triage
+→ Squad triages open issues via CLI
+→ User happy: "I have full control."
+
+$ squad init --with-actions (for power users)
+→ Installs automation workflows
+→ User knows exactly what they're opting into
+```
+
+### Messaging for Existing Users
+**Blog post: "Introducing CLI-First Squad"**
+
+1. **Why we're changing:**
+   - Developer feedback showed Actions felt opaque
+   - Teams want explicit control over their automation
+   - Zero-config is better than "config by side effects"
+
+2. **What happens to existing installs:**
+   - Existing workflows keep working (backward compatible)
+   - `squad upgrade` downloads latest, no forced removal
+   - Users can manually delete workflows if they want
+
+3. **Upgrade path:**
+   - **Do nothing:** Current workflows stay. You're not on the new path yet.
+   - **Adopt CLI-first:** Run `squad init --clean-actions` to remove workflows, use CLI commands
+   - **Stay hybrid:** Keep workflows and use CLI as you prefer
+
+---
+
+## 4. Competitive Positioning — Squad vs. Cursor, Aider, etc.
+
+### Competitive Landscape
+- **Cursor:** Client-side LSP + LLM. Zero GitHub integration. Zero Actions.
+- **Aider:** CLI agent. Optional integrations (GitHub API). No Actions installed.
+- **GitHub Copilot in Cursor/VS Code:** Runs locally. No repo automation.
+- **GitHubCopilot in GitHub.dev:** Browser-based. No background workflows.
+
+### Squad's Differentiation
+- **Unique:** Multi-agent orchestration + GitHub native (Actions + SDK)
+- **Risk:** If perceived as "Squad spams my repo with automation," it becomes a *negative* differentiator
+- **Opportunity:** If we own "transparent, user-controlled automation," it's a *positive* one
+
+**"Zero Actions required" is a DIFFERENTIATOR.** It signals maturity and respect for the user's repository.
+
+---
+
+## 5. Opt-In Model — Proposed UX
+
+### Design: Tiered Automation
+**Tier 1: Manual CLI (Default)**
+```bash
+squad init                           # No workflows installed
+squad triage                         # User explicitly runs triage
+squad rc                             # Connect remote squad mode
+```
+
+**Tier 2: Semi-Automated (Opt-In)**
+```bash
+squad init --with-automation         # Installs key workflows only
+  - sync-squad-labels (on team.md push)
+  - squad-triage (on label event)
+  - squad-heartbeat (Ralph's triage, manual + event-driven)
+```
+
+**Tier 3: Full Automation (Enterprise)**
+```bash
+squad init --with-full-automation    # All 5+ workflows, cron enabled
+  - Everything in Tier 2
+  - squad-label-enforce (auto-fix labels)
+  - squad-issue-assign (auto-route assignments)
+  - Heartbeat cron enabled (every 30min)
+```
+
+### Commands
+```bash
+# Post-init opt-in
+squad actions install              # Install tier 2 (semi-auto)
+squad actions install --full       # Install tier 3 (full auto)
+squad actions uninstall            # Remove all workflows
+squad actions status               # Show which workflows are active + usage stats
+
+# Power user config
+squad init --with-actions=heartbeat,triage  # Cherry-pick workflows
+```
+
+### Documentation Strategy
+- **docs/getting-started.md**: Emphasize CLI-first (Tier 1) as the default happy path
+- **docs/automation.md**: Deep dive into workflows, when to use them, quota implications
+- **docs/team-workflows/multi-team-setup.md**: When enterprises add Tier 3
+- **Migration guide:** For Beta users currently on actions-first
+
+---
+
+## 6. Documentation Impact
+
+### Files/Content That Need Changes
+
+#### 1. **README.md** (High Priority)
+- Current: Mentions Squad installs and runs automatically
+- New: Lead with CLI-first story
+- Add: "Squad gives you full control. No background automation by default."
+
+#### 2. **docs/getting-started.md** (New)
+- Step 1: `squad init` + quick wins with CLI
+- Step 2 (optional): Explore automation with `squad actions install`
+- Tone: CLI is the main story, Actions are an *add-on*
+
+#### 3. **docs/automation/github-actions.md** (New Deep Dive)
+- When to use Actions (large teams, 24/7 coverage)
+- Quota calculator (estimate your monthly cost)
+- Troubleshooting: "Why are my Actions running so much?"
+- Performance: "Reducing noise with workflow filters"
+
+#### 4. **docs/cli-reference.md** (Update)
+- Add new commands: `squad triage`, `squad actions *`
+- Update `squad init` docs with `--with-actions` and `--with-full-automation` flags
+
+#### 5. **CHANGELOG.md** (Next Release Notes)
+- Breaking change: `squad init` no longer installs workflows
+- Migration: Add section "Upgrading from Actions-First to CLI-First"
+
+#### 6. **Migration Guide: `docs/MIGRATION-ACTIONS-TO-CLI.md`**
+- For Beta users: How to transition safely
+- Step-by-step removal of workflows
+- CLI equivalent commands for each workflow
+
+#### 7. **docs/blog/**: Announcement Post
+- Title: "Squad is Now CLI-First — Workflows Are Optional"
+- Sections:
+  - Why we changed
+  - How to upgrade
+  - Performance implications
+  - Getting the best of both worlds
+
+---
+
+## Recommendations
+
+### 1. **Adopt CLI-First as Default** ✅
+- Install NO workflows by default during `squad init`
+- Users get clarity and control from the start
+- This aligns with DevRel principle: **transparency > magic**
+
+### 2. **Tier 2 Automation for Normal Teams** ✅
+- `squad init --with-automation` is the "easy mode"
+- Installs only the workflows that provide the most value
+- Reduces noise while maintaining productivity
+
+### 3. **Messaging Priority**
+1. Write "CLI-First Intro" blog post (explain why, not just what)
+2. Migrate docs to CLI-first narrative (README first, docs/ second)
+3. Create migration guide for existing users
+4. Announce in community channels (GitHub Discussions, Discord) with empathy for existing setups
+
+### 4. **Backwards Compatibility** ✅
+- Existing installs with actions-first continue to work
+- `squad upgrade` doesn't force removal
+- Users have choice in their upgrade path
+
+### 5. **Address the "But Teams Need Automation" Objection**
+- This is valid for enterprise/large teams
+- Answer: Tier 2 and 3 options serve those needs
+- CLI-first doesn't punish power users; it empowers choice users
+
+---
+
+## Impact Summary
+
+| Dimension | Current (Actions-First) | Proposed (CLI-First) |
+|-----------|--------------------------|---------------------|
+| **User Control** | Hidden automation (medium trust) | Explicit commands (high trust) |
+| **Surprise Factor** | High ("Why are all these running?") | None (user decides) |
+| **Quota Cost** | Low in practice (~100min/mo) | None by default |
+| **Team Adoption** | Fast for laggard teams | Fast for thoughtful teams |
+| **Perception** | "Squad does things to my repo" | "Squad does what I ask" |
+| **DevRel Story** | Complex (explain why automate) | Simple (you're in control) |
+| **Competitive Diff.** | Neutral | **Positive** (transparent automation) |
+
+---
+
+## Next Steps
+
+1. **Align with Brady** on CLI-first decision
+2. **Update docs** (start with README)
+3. **Create migration playbook** for Beta users
+4. **Design UX** for `squad init --with-actions` flag
+5. **Blog post** announcing the shift (empathy + clarity)
+6. **Community communication** (FAQs, Discussions, Discord)
+
+---
+
+**Tone Note:** This recommendation respects user autonomy. We're not saying "automation is bad." We're saying "you should decide your team's automation level, not us." That's the DevRel story. That builds trust.
+
+
+
+
