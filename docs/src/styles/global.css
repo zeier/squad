@@ -1,0 +1,151 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-squad-50: #eef2ff;
+  --color-squad-100: #e0e7ff;
+  --color-squad-200: #c7d2fe;
+  --color-squad-300: #a5b4fc;
+  --color-squad-400: #818cf8;
+  --color-squad-500: #6366f1;
+  --color-squad-600: #4f46e5;
+  --color-squad-700: #4338ca;
+  --color-squad-800: #3730a3;
+  --color-squad-900: #312e81;
+
+  --color-surface-50: #fafafa;
+  --color-surface-100: #f4f4f5;
+  --color-surface-200: #e4e4e7;
+  --color-surface-300: #d4d4d8;
+  --color-surface-400: #a1a1aa;
+  --color-surface-500: #71717a;
+  --color-surface-600: #52525b;
+  --color-surface-700: #3f3f46;
+  --color-surface-800: #27272a;
+  --color-surface-900: #18181b;
+  --color-surface-950: #09090b;
+}
+
+/* Base styles */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-white text-surface-900 dark:bg-surface-950 dark:text-surface-100 transition-colors duration-200;
+}
+
+/* Prose styles for markdown content */
+.prose {
+  @apply max-w-none text-surface-800 dark:text-surface-200 leading-relaxed;
+}
+
+.prose h1 {
+  @apply text-3xl font-bold mt-8 mb-4 text-surface-900 dark:text-white border-b border-surface-200 dark:border-surface-700 pb-2;
+}
+
+.prose h2 {
+  @apply text-2xl font-semibold mt-8 mb-3 text-surface-900 dark:text-white border-b border-surface-200 dark:border-surface-800 pb-1;
+}
+
+.prose h3 {
+  @apply text-xl font-semibold mt-6 mb-2 text-surface-900 dark:text-white;
+}
+
+.prose h4 {
+  @apply text-lg font-semibold mt-4 mb-2 text-surface-900 dark:text-white;
+}
+
+.prose p {
+  @apply my-4;
+}
+
+.prose a {
+  @apply text-squad-600 dark:text-squad-400 underline underline-offset-2 hover:text-squad-700 dark:hover:text-squad-300 transition-colors;
+}
+
+.prose strong {
+  @apply font-semibold text-surface-900 dark:text-white;
+}
+
+.prose ul {
+  @apply my-4 ml-6 list-disc space-y-1;
+}
+
+.prose ol {
+  @apply my-4 ml-6 list-decimal space-y-1;
+}
+
+.prose li {
+  @apply leading-relaxed;
+}
+
+.prose li > ul,
+.prose li > ol {
+  @apply my-1;
+}
+
+.prose blockquote {
+  @apply border-l-4 border-squad-400 dark:border-squad-600 pl-4 my-4 italic text-surface-600 dark:text-surface-400 bg-squad-50/50 dark:bg-squad-900/20 py-2 rounded-r-lg;
+}
+
+.prose code {
+  @apply bg-surface-100 dark:bg-surface-800 text-squad-700 dark:text-squad-300 px-1.5 py-0.5 rounded text-sm font-mono;
+}
+
+.prose pre {
+  @apply bg-surface-900 dark:bg-surface-900 text-surface-100 rounded-lg p-4 my-4 overflow-x-auto text-sm leading-relaxed;
+}
+
+.prose pre code {
+  @apply bg-transparent text-inherit p-0 rounded-none text-sm;
+}
+
+.prose table {
+  @apply w-full my-4 border-collapse;
+}
+
+.prose thead {
+  @apply bg-surface-50 dark:bg-surface-800;
+}
+
+.prose th {
+  @apply px-4 py-2 text-left font-semibold text-surface-900 dark:text-white border-b-2 border-surface-200 dark:border-surface-700;
+}
+
+.prose td {
+  @apply px-4 py-2 border-b border-surface-200 dark:border-surface-800;
+}
+
+.prose tr:hover {
+  @apply bg-surface-50 dark:bg-surface-800/50;
+}
+
+.prose img {
+  @apply rounded-lg my-4 max-w-full;
+}
+
+.prose hr {
+  @apply my-8 border-surface-200 dark:border-surface-700;
+}
+
+/* Sidebar styles */
+.sidebar-link {
+  @apply block px-3 py-1.5 text-sm rounded-md transition-colors text-surface-600 dark:text-surface-400 hover:bg-surface-100 dark:hover:bg-surface-800 hover:text-surface-900 dark:hover:text-white;
+}
+
+.sidebar-link.active {
+  @apply bg-squad-50 dark:bg-squad-900/30 text-squad-700 dark:text-squad-300 font-medium;
+}
+
+/* Shiki code block theme support */
+.astro-code {
+  @apply rounded-lg p-4 my-4 overflow-x-auto text-sm leading-relaxed;
+}
+
+html.dark .astro-code,
+html.dark .astro-code span {
+  color: var(--shiki-dark) !important;
+  background-color: var(--shiki-dark-bg) !important;
+}

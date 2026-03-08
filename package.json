@@ -1,6 +1,6 @@
 {
   "name": "@bradygaster/squad",
-  "version": "0.8.24",
+  "version": "0.8.24.1",
   "private": true,
   "description": "Squad — Programmable multi-agent runtime for GitHub Copilot, built on @github/copilot-sdk",
   "type": "module",
@@ -16,8 +16,9 @@
     "lint": "tsc --noEmit -p packages/squad-sdk/tsconfig.json && tsc --noEmit -p packages/squad-cli/tsconfig.json",
     "dev:link": "npm run build && cd packages/squad-sdk && npm link && cd ../squad-cli && npm link",
     "dev:unlink": "cd packages/squad-cli && npm unlink && cd ../squad-sdk && npm unlink",
-    "docs:build": "node docs/build.js",
-    "docs:preview": "cd docs/dist && npx serve ."
+    "docs:build": "cd docs && npm run build",
+    "docs:dev": "cd docs && npm run dev",
+    "docs:preview": "cd docs && npm run preview"
   },
   "engines": {
     "node": ">=20.0.0"
@@ -28,8 +29,6 @@
     "@opentelemetry/sdk-trace-base": "^2.5.1",
     "@playwright/test": "^1.58.2",
     "@vitest/coverage-v8": "^3.2.4",
-    "highlight.js": "^11.11.1",
-    "markdown-it": "^14.1.1",
     "playwright": "^1.58.2",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
